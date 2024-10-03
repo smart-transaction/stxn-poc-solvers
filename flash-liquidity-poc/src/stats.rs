@@ -34,11 +34,11 @@ pub fn get_stats_json(
 ) -> Json {
     match stats.lock() {
         Ok(stats) => {
-            let mut filtered: Vec<TimerExecutorStats> = stats
+            let mut filtered = stats
                 .clone()
                 .into_values()
                 .filter(|el| filter.is_empty() || filter.contains(&el.status))
-                .collect();
+                .collect::<Vec<TimerExecutorStats>>();
             filtered.sort_by(|el1, el2| el1.creation_time.cmp(&el2.creation_time));
             json(&filtered)
         }

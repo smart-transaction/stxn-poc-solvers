@@ -35,7 +35,7 @@ async fn main() {
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
     let (stats_tx, stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
         mpsc::channel();
-    let mut exec_set: JoinSet<()> = JoinSet::new();
+    let mut exec_set = JoinSet::new();
 
     let exec_frame = TimerExecutorFrame::new(args.tick_secs, args.tick_nanos, stats_tx);
     let mut listener = LaminatedProxyListener::new(args.ws, exec_frame);

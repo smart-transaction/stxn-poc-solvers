@@ -145,7 +145,7 @@ impl TimerExecutor {
 
     // Send statistics into the stats channel
     fn send_stats(&self, status: ExecStatus, now: &Instant, params: FlashLiquidityParams) {
-        let remaining: Duration;
+        let remaining;
         if status == ExecStatus::RUNNING {
             remaining = params.time_limit.abs_diff(now.elapsed());
         } else {
