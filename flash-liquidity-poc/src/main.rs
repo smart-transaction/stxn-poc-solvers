@@ -22,6 +22,9 @@ pub struct Args {
 
     #[arg(long, default_value_t = 0)]
     pub tick_nanos: u32,
+
+    #[arg(long)]
+    pub ws: String,
 }
 
 #[tokio::main]
@@ -35,7 +38,7 @@ async fn main() {
     let mut exec_set: JoinSet<()> = JoinSet::new();
 
     let exec_frame = TimerExecutorFrame::new(args.tick_secs, args.tick_nanos, stats_tx);
-    let mut listener = LaminatedProxyListener::new(exec_frame);
+    let mut listener = LaminatedProxyListener::new(args.ws, exec_frame);
     exec_set.spawn(async move {
         listener.listen().await;
     });

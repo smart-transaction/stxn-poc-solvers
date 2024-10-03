@@ -1,4 +1,5 @@
 use crate::flash_liquidity;
+use fatal::fatal;
 use serde::{Deserialize, Serialize};
 use std::{
   collections::{HashMap, HashSet},
@@ -61,7 +62,7 @@ pub fn run_stats_receive(
                       stats_map.insert(stats.id, stats);
                   }
                   Err(err) => {
-                      panic!("Error locking the mutex: {}", err);
+                      fatal!("Error locking the mutex: {}", err);
                   }
               }
           }

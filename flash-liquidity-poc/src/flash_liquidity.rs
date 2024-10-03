@@ -1,8 +1,10 @@
 use bigdecimal::BigDecimal;
+use ethers::providers::{Provider, Ws};
+use fatal::fatal;
 use serde::{Deserialize, Serialize};
 use std::{
     str::FromStr,
-    sync::mpsc::Sender,
+    sync::{mpsc::Sender, Arc},
     thread::{self, sleep},
     time::{Duration, Instant, SystemTime},
 };
@@ -19,64 +21,69 @@ pub struct FlashLiquidityParams {
 }
 
 pub struct LaminatedProxyListener {
+    ws: String,
     executor_frame: TimerExecutorFrame,
 }
 
 impl LaminatedProxyListener {
-    pub fn new(
-        executor_frame: TimerExecutorFrame,
-    ) -> LaminatedProxyListener {
-        LaminatedProxyListener {
-            executor_frame,
-        }
+    pub fn new(ws: String, executor_frame: TimerExecutorFrame) -> LaminatedProxyListener {
+        LaminatedProxyListener { ws, executor_frame }
     }
 
     pub async fn listen(&mut self) {
-        println!("Start listener");
-        // let provider = Provider::<Ws>::connect(self.ws.as_str()).await;
-        // let client = Arc::new(provider);
-        // TODO: Create a contract from ABI
+        println!("Starting listener...");
+        println!("Connecting to the provider with URL {} ...", self.ws.as_str());
+        match Provider::<Ws>::connect(self.ws.as_str()).await {
+            Ok(provider) => {
+                println!("Connected successfully!");
+                let _client = Arc::new(provider);
+                // TODO: Create a contract from ABI
 
-        // Here is a simulation of the LaminatedProxy triggering and running executors.
-        let params1 = FlashLiquidityParams {
-            token: "USDC".into(),
-            price: BigDecimal::from(2500),
-            slippage: BigDecimal::from_str("0.5").unwrap(),
-            time_limit: Duration::new(2 * 60, 0),
-        };
-        self.executor_frame.start_executor(params1);
+                // Here is a simulation of the LaminatedProxy triggering and running executors.
+                let params1 = FlashLiquidityParams {
+                    token: "USDC".into(),
+                    price: BigDecimal::from(2500),
+                    slippage: BigDecimal::from_str("0.5").unwrap(),
+                    time_limit: Duration::new(2 * 60, 0),
+                };
+                self.executor_frame.start_executor(params1);
 
-        sleep(Duration::new(1, 0));
+                sleep(Duration::new(1, 0));
 
-        let params = FlashLiquidityParams {
-            token: "USDC".into(),
-            price: BigDecimal::from(2502),
-            slippage: BigDecimal::from_str("0.35").unwrap(),
-            time_limit: Duration::new(60, 0),
-        };
-        self.executor_frame.start_executor(params);
+                let params = FlashLiquidityParams {
+                    token: "USDC".into(),
+                    price: BigDecimal::from(2502),
+                    slippage: BigDecimal::from_str("0.35").unwrap(),
+                    time_limit: Duration::new(60, 0),
+                };
+                self.executor_frame.start_executor(params);
 
-        sleep(Duration::new(60, 0));
+                sleep(Duration::new(60, 0));
 
-        let params = FlashLiquidityParams {
-            token: "USDT".into(),
-            price: BigDecimal::from(2503),
-            slippage: BigDecimal::from_str("0.31").unwrap(),
-            time_limit: Duration::new(1 * 60, 0),
-        };
-        self.executor_frame.start_executor(params);
+                let params = FlashLiquidityParams {
+                    token: "USDT".into(),
+                    price: BigDecimal::from(2503),
+                    slippage: BigDecimal::from_str("0.31").unwrap(),
+                    time_limit: Duration::new(1 * 60, 0),
+                };
+                self.executor_frame.start_executor(params);
 
-        sleep(Duration::new(15, 0));
+                sleep(Duration::new(15, 0));
 
-        let params = FlashLiquidityParams {
-            token: "USDT".into(),
-            price: BigDecimal::from(2680),
-            slippage: BigDecimal::from_str("0.99").unwrap(),
-            time_limit: Duration::new(25, 0),
-        };
-        self.executor_frame.start_executor(params);
+                let params = FlashLiquidityParams {
+                    token: "USDT".into(),
+                    price: BigDecimal::from(2680),
+                    slippage: BigDecimal::from_str("0.99").unwrap(),
+                    time_limit: Duration::new(25, 0),
+                };
+                self.executor_frame.start_executor(params);
 
-        sleep(Duration::new(24 * 60 * 60, 0));
+                sleep(Duration::new(24 * 60 * 60, 0));
+            }
+            Err(err) => {
+                fatal!("Failed connection to the chain: {}", err);
+            }
+        }
     }
 }
 
@@ -101,7 +108,7 @@ impl TimerExecutor {
     pub fn new(tick_duration: Duration, stats_tx: Sender<TimerExecutorStats>) -> TimerExecutor {
         let creation_time_res = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
         if creation_time_res.is_err() {
-            panic!(
+            fatal!(
                 "Error getting system time: {}",
                 creation_time_res.err().unwrap()
             );
