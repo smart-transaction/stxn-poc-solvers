@@ -32,7 +32,10 @@ impl LaminatedProxyListener {
 
     pub async fn listen(&mut self) {
         println!("Starting listener...");
-        println!("Connecting to the provider with URL {} ...", self.ws.as_str());
+        println!(
+            "Connecting to the provider with URL {} ...",
+            self.ws.as_str()
+        );
         match Provider::<Ws>::connect(self.ws.as_str()).await {
             Ok(provider) => {
                 println!("Connected successfully!");
