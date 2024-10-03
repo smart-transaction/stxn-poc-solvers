@@ -25,6 +25,9 @@ pub struct Args {
 
     #[arg(long)]
     pub ws: String,
+
+    #[arg(long, default_value_t = 5)]
+    pub n_executors: usize,
 }
 
 #[tokio::main]
@@ -37,7 +40,8 @@ async fn main() {
         mpsc::channel();
     let mut exec_set = JoinSet::new();
 
-    let exec_frame = TimerExecutorFrame::new(args.tick_secs, args.tick_nanos, stats_tx);
+    let exec_frame =
+        TimerExecutorFrame::new(args.tick_secs, args.tick_nanos, stats_tx, args.n_executors);
     let mut listener = LaminatedProxyListener::new(args.ws, exec_frame);
     exec_set.spawn(async move {
         listener.listen().await;

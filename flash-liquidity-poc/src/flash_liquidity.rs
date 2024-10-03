@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     str::FromStr,
     sync::{mpsc::Sender, Arc},
-    thread::{self, sleep},
+    thread::sleep,
     time::{Duration, Instant, SystemTime},
 };
+use threadpool::ThreadPool;
 use uuid::Uuid;
 
 use crate::stats::{ExecStatus, TimerExecutorStats};
@@ -58,6 +59,16 @@ impl LaminatedProxyListener {
                     price: BigDecimal::from(2502),
                     slippage: BigDecimal::from_str("0.35").unwrap(),
                     time_limit: Duration::new(60, 0),
+                };
+                self.executor_frame.start_executor(params);
+
+                sleep(Duration::new(1, 0));
+
+                let params = FlashLiquidityParams {
+                    token: "USDC".into(),
+                    price: BigDecimal::from(2600),
+                    slippage: BigDecimal::from_str("0.01").unwrap(),
+                    time_limit: Duration::new(300, 0),
                 };
                 self.executor_frame.start_executor(params);
 
@@ -128,6 +139,7 @@ impl TimerExecutor {
 
     // Execute the FlashLiquidity executor with given params.
     pub fn execute(&self, params: FlashLiquidityParams) {
+        println!("Executor {} started", self.id);
         // Initialize timer
         let now = Instant::now();
         while now.elapsed() < params.time_limit {
@@ -141,6 +153,7 @@ impl TimerExecutor {
         }
         // Sending post-exec stats
         self.send_stats(ExecStatus::TIMEOUT, &now, params);
+        println!("Executor {} finished", self.id);
     }
 
     // Send statistics into the stats channel
@@ -172,23 +185,40 @@ pub struct TimerExecutorFrame {
 
     // Stats channels
     stats_tx: Sender<TimerExecutorStats>,
+
+    // Executors Pool
+    pool: ThreadPool,
 }
 
 impl TimerExecutorFrame {
-    pub fn new(secs: u64, nanos: u32, stats_tx: Sender<TimerExecutorStats>) -> TimerExecutorFrame {
+    pub fn new(
+        secs: u64,
+        nanos: u32,
+        stats_tx: Sender<TimerExecutorStats>,
+        n_workers: usize,
+    ) -> TimerExecutorFrame {
         let ret = TimerExecutorFrame {
             tick_duration: Duration::new(secs, nanos),
             stats_tx,
+            pool: ThreadPool::new(n_workers),
         };
 
         ret
     }
 
-    pub fn start_executor(&mut self, params: FlashLiquidityParams) {
+    pub fn start_executor(&self, params: FlashLiquidityParams) {
         let dur = self.tick_duration.clone();
         let executor = TimerExecutor::new(dur, self.stats_tx.clone());
-        thread::spawn(move || {
+        let exec_id = executor.id.clone();
+        self.pool.execute(move || {
             executor.execute(params);
         });
+        println!(
+            "New executor {} pushed to pool, active: {}, queued: {}, panicked: {}",
+            exec_id,
+            self.pool.active_count(),
+            self.pool.queued_count(),
+            self.pool.panic_count()
+        );
     }
 }

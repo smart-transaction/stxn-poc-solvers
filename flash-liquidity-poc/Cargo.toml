@@ -15,3 +15,4 @@ futures = "0.3.30"
 serde = "1.0.210"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 log = { version = "0.4.22", features = ["std", "serde"] }
+threadpool = "1.8.1"
