@@ -65,7 +65,7 @@ async fn main() {
     let mut exec_set = JoinSet::new();
 
     println!(
-        "Connecting to the provider with URL {} ...",
+        "Connecting to the chain with URL {} ...",
         args.ws_chain_url.as_str()
     );
     let provider_res = Provider::<Ws>::connect(args.ws_chain_url.as_str()).await;
