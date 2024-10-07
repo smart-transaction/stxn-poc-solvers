@@ -1,7 +1,8 @@
-use crate::{contracts_abi::laminator::AdditionalData, solvers::limit_order::LimitOrderSolver};
 use ethers::types::H256;
 use parse_duration;
 use std::{fmt, fmt::Display, sync::Arc, time::Duration};
+
+use crate::{contracts_abi::laminator::AdditionalData, solvers::limit_order::LimitOrderSolver};
 
 pub enum SolverError {
     InvalidParam(String),
@@ -22,7 +23,7 @@ impl Display for SolverError {
 }
 
 pub trait Solver {
-    fn app(&self) -> String; 
+    fn app(&self) -> String;
     fn exec_solver_step(&self) -> Result<bool, SolverError>;
     fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error>;
 }

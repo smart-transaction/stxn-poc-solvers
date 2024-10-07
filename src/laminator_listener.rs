@@ -1,23 +1,24 @@
-use crate::{
-    contracts_abi::laminator::{Laminator, ProxyPushedFilter},
-    timer_executor::TimerExecutorFrame,
-};
 use ethers::{
     providers::{Middleware, StreamExt}, types::U64,
 };
 use fatal::fatal;
 
-pub struct LaminatedProxyListener<M> {
+use crate::{
+    contracts_abi::laminator::{Laminator, ProxyPushedFilter},
+    timer_executor::TimerExecutorFrame,
+};
+
+pub struct LaminatorListener<M> {
     laminator_contract: Laminator<M>,
     executor_frame: TimerExecutorFrame<M>,
 }
 
-impl<M: Middleware + 'static> LaminatedProxyListener<M> {
+impl<M: Middleware + 'static> LaminatorListener<M> {
     pub fn new(
         laminator_contract: Laminator<M>,
         executor_frame: TimerExecutorFrame<M>,
-    ) -> LaminatedProxyListener<M> {
-        LaminatedProxyListener::<M> {
+    ) -> LaminatorListener<M> {
+        LaminatorListener::<M> {
             laminator_contract,
             executor_frame,
         }

@@ -1,4 +1,3 @@
-use crate::contracts_abi::laminator::AdditionalData;
 use fatal::fatal;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -9,6 +8,8 @@ use std::{
 };
 use uuid::Uuid;
 use warp::reply::{json, Json};
+
+use crate::contracts_abi::laminator::AdditionalData;
 
 // Executor statistics
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]

@@ -13,18 +13,17 @@ use std::{
 use tokio::task::JoinSet;
 use warp::Filter;
 
+use crate::contracts_abi::{CallBreaker, Laminator};
+use crate::laminator_listener::LaminatorListener;
+use crate::stats::{get_stats_json, run_stats_receive, ExecStatus, TimerExecutorStats};
+use crate::timer_executor::TimerExecutorFrame;
+
 mod contracts_abi;
 mod laminator_listener;
 mod solver_factory;
 mod solvers;
 mod stats;
 mod timer_executor;
-
-use crate::contracts_abi::{CallBreaker, Laminator};
-
-use laminator_listener::LaminatedProxyListener;
-use stats::{get_stats_json, run_stats_receive, ExecStatus, TimerExecutorStats};
-use timer_executor::TimerExecutorFrame;
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -82,7 +81,7 @@ async fn main() {
     let exec_frame =
         TimerExecutorFrame::new(call_breaker_contract, args.tick_secs, args.tick_nanos, stats_tx, args.n_executors);
     
-    let mut listener = LaminatedProxyListener::new(laminator_contract, exec_frame);
+    let mut listener = LaminatorListener::new(laminator_contract, exec_frame);
 
     let block_res = ws_client.provider().get_block_number().await;
     if block_res.is_err() {

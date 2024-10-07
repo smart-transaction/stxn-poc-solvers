@@ -1,7 +1,3 @@
-use crate::{
-    contracts_abi::laminator::AdditionalData,
-    solver_factory::{Solver, SolverError},
-};
 use bigdecimal::{BigDecimal, ParseBigDecimalError};
 use ethers::types::H256;
 use ethers_core::abi;
@@ -9,6 +5,11 @@ use ethers_core::abi::Token;
 use keccak_hash::keccak;
 use parse_duration;
 use std::{str::FromStr, time::Duration};
+
+use crate::{
+    contracts_abi::laminator::AdditionalData,
+    solver_factory::{Solver, SolverError},
+};
 
 const APP_SELECTOR: &str = "LIMIT_ORDER";
 
