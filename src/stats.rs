@@ -1,4 +1,4 @@
-use crate::flash_liquidity;
+use crate::contracts_abi::laminator::AdditionalData;
 use fatal::fatal;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,16 +14,19 @@ use warp::reply::{json, Json};
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum ExecStatus {
     RUNNING,
-    COMPLETED,
+    SUCCEEDED,
+    FAILED,
     TIMEOUT,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimerExecutorStats {
     pub id: Uuid,
+    pub app: String,
     pub creation_time: Duration,
     pub status: ExecStatus,
-    pub params: flash_liquidity::FlashLiquidityParams,
+    pub message: String,
+    pub params: Vec<AdditionalData>,
     pub elapsed: Duration,
     pub remaining: Duration,
 }

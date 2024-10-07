@@ -16,3 +16,6 @@ serde = "1.0.210"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 log = { version = "0.4.22", features = ["std", "serde"] }
 threadpool = "1.8.1"
+parse_duration = "2.1.1"
+ethers-core = "2.0.14"
+keccak-hash = "0.11.0"
