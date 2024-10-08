@@ -1,6 +1,9 @@
 use clap::Parser;
 use ethers::{
-    core::types::Address, middleware::SignerMiddleware, providers::{Middleware, Provider, Ws}, signers::{LocalWallet, Signer}
+    core::types::Address,
+    middleware::SignerMiddleware,
+    providers::{Middleware, Provider, Ws},
+    signers::{LocalWallet, Signer},
 };
 use fatal::fatal;
 use std::{
@@ -59,10 +62,8 @@ async fn main() {
     let args = Args::parse();
     let wallet = args.wallet_private_key.with_chain_id(args.chain_id);
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
-    let (stats_tx, stats_rx): (
-        Sender<TimerExecutorStats>,
-        Receiver<TimerExecutorStats>,
-    ) = mpsc::channel();
+    let (stats_tx, stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
+        mpsc::channel();
     let exec_set = Arc::new(Mutex::new(JoinSet::new()));
 
     println!(
@@ -71,7 +72,10 @@ async fn main() {
     );
     let provider_res = Provider::<Ws>::connect(args.ws_chain_url.as_str()).await;
     if provider_res.is_err() {
-        fatal!("Failed connection to the chain: {}", provider_res.err().unwrap());
+        fatal!(
+            "Failed connection to the chain: {}",
+            provider_res.err().unwrap()
+        );
     }
     println!("Connected successfully!");
     let ws_client = Arc::new(SignerMiddleware::new(provider_res.ok().unwrap(), wallet));
@@ -81,10 +85,18 @@ async fn main() {
     custom_contracts_addresses.insert("FLASH_LOAN".to_string(), args.flash_loan_address);
     custom_contracts_addresses.insert("SWAP_POOL".to_string(), args.swap_pool_address);
 
-    let exec_frame =
-        TimerExecutorFrame::new(args.call_breaker_address, ws_client.clone(), custom_contracts_addresses, exec_set.clone(), args.tick_secs, args.tick_nanos, stats_tx);
-    
-    let mut listener = LaminatorListener::new(args.laminator_address, ws_client.clone(), exec_frame);
+    let exec_frame = TimerExecutorFrame::new(
+        args.call_breaker_address,
+        ws_client.clone(),
+        custom_contracts_addresses,
+        exec_set.clone(),
+        args.tick_secs,
+        args.tick_nanos,
+        stats_tx,
+    );
+
+    let mut listener =
+        LaminatorListener::new(args.laminator_address, ws_client.clone(), exec_frame);
 
     let block_res = ws_client.provider().get_block_number().await;
     if block_res.is_err() {
