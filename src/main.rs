@@ -28,6 +28,9 @@ mod timer_executor;
 
 #[derive(Parser, Debug)]
 pub struct Args {
+    #[arg(long, default_value_t = 3030)]
+    pub port: u16,
+
     #[arg(long)]
     pub chain_id: u64,
 
@@ -128,5 +131,5 @@ async fn main() {
     let routes = default_route.or(stats);
 
     // Start all services
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(routes).run(([127, 0, 0, 1], args.port)).await;
 }
