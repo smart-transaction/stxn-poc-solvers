@@ -13,14 +13,12 @@ use std::{
 use tokio::task::JoinSet;
 use warp::Filter;
 
-use crate::contracts_abi::{CallBreaker, Laminator};
 use crate::laminator_listener::LaminatorListener;
 use crate::stats::{get_stats_json, run_stats_receive, ExecStatus, TimerExecutorStats};
 use crate::timer_executor::TimerExecutorFrame;
 
 mod contracts_abi;
 mod laminator_listener;
-mod solver_factory;
 mod solvers;
 mod stats;
 mod timer_executor;
@@ -40,6 +38,12 @@ pub struct Args {
     pub call_breaker_address: Address,
 
     #[arg(long)]
+    pub flash_loan_address: Address,
+
+    #[arg(long)]
+    pub swap_pool_address: Address,
+
+    #[arg(long)]
     pub wallet_private_key: LocalWallet,
 
     #[arg(long, default_value_t = 1)]
@@ -47,9 +51,6 @@ pub struct Args {
 
     #[arg(long, default_value_t = 0)]
     pub tick_nanos: u32,
-
-    #[arg(long, default_value_t = 5)]
-    pub n_executors: usize,
 }
 
 #[tokio::main]
@@ -62,7 +63,7 @@ async fn main() {
         Sender<TimerExecutorStats>,
         Receiver<TimerExecutorStats>,
     ) = mpsc::channel();
-    let mut exec_set = JoinSet::new();
+    let exec_set = Arc::new(Mutex::new(JoinSet::new()));
 
     println!(
         "Connecting to the chain with URL {} ...",
@@ -75,13 +76,15 @@ async fn main() {
     println!("Connected successfully!");
     let ws_client = Arc::new(SignerMiddleware::new(provider_res.ok().unwrap(), wallet));
 
-    let laminator_contract = Laminator::new(args.laminator_address, ws_client.clone());
-    let call_breaker_contract = Arc::new(CallBreaker::new(args.call_breaker_address, ws_client.clone()));
+    // Addresses of specific solvers contracts.
+    let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();
+    custom_contracts_addresses.insert("FLASH_LOAN".to_string(), args.flash_loan_address);
+    custom_contracts_addresses.insert("SWAP_POOL".to_string(), args.swap_pool_address);
 
     let exec_frame =
-        TimerExecutorFrame::new(call_breaker_contract, args.tick_secs, args.tick_nanos, stats_tx, args.n_executors);
+        TimerExecutorFrame::new(args.call_breaker_address, ws_client.clone(), custom_contracts_addresses, exec_set.clone(), args.tick_secs, args.tick_nanos, stats_tx);
     
-    let mut listener = LaminatorListener::new(laminator_contract, exec_frame);
+    let mut listener = LaminatorListener::new(args.laminator_address, ws_client.clone(), exec_frame);
 
     let block_res = ws_client.provider().get_block_number().await;
     if block_res.is_err() {
@@ -89,13 +92,20 @@ async fn main() {
     }
     let block = block_res.ok().unwrap();
 
-    exec_set.spawn(async move {
-        listener.listen(block).await;
-    });
     let stats_map_copy = Arc::clone(&stats_map);
-    exec_set.spawn(async move {
-        run_stats_receive(&stats_rx, stats_map_copy);
-    });
+    match exec_set.lock() {
+        Ok(mut exec_set) => {
+            exec_set.spawn(async move {
+                listener.listen(block).await;
+            });
+            exec_set.spawn(async move {
+                run_stats_receive(&stats_rx, stats_map_copy);
+            });
+        }
+        Err(err) => {
+            fatal!("Error locking exec_stat: {}", err);
+        }
+    }
     let default_route = warp::path::end().map(|| warp::reply::html("FlashLiquidity Solver"));
     let stats = warp::path("stats").map(move || {
         let stats_map = Arc::clone(&stats_map);

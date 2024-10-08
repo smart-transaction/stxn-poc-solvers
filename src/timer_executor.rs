@@ -1,19 +1,20 @@
-use ethers::providers::Middleware;
+use ethers::{abi::Address, providers::Middleware};
 use fatal::fatal;
 use std::{
-    sync::{mpsc::Sender, Arc},
+    collections::HashMap,
+    sync::{mpsc::Sender, Arc, Mutex},
     thread::sleep,
     time::{Duration, Instant, SystemTime},
 };
-use threadpool::ThreadPool;
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::{
     contracts_abi::{
-        call_breaker::CallBreaker,
         laminator::{AdditionalData, ProxyPushedFilter},
+        CallBreaker,
     },
-    solver_factory::SolverFactory,
+    solvers::limit_order::LimitOrderSolver,
     stats::{ExecStatus, TimerExecutorStats},
 };
 
@@ -25,7 +26,13 @@ struct TimerRequestExecutor<M> {
     id: Uuid,
 
     // Call breaker contract
-    call_breaker_contract: Arc<CallBreaker<M>>,
+    call_breaker_contract: CallBreaker<M>,
+
+    // Middleware instance
+    middleware: Arc<M>,
+
+    // Custom contract addresses
+    custom_contracts_addresses: HashMap<String, Address>,
 
     // Creation time since Unix epoch, used for ordering executors in stats
     creation_time: Duration,
@@ -37,9 +44,11 @@ struct TimerRequestExecutor<M> {
     stats_tx: Sender<TimerExecutorStats>,
 }
 
-impl<M: Middleware> TimerRequestExecutor<M> {
+impl<M: Middleware + 'static> TimerRequestExecutor<M> {
     pub fn new(
-        call_breaker_contract: Arc<CallBreaker<M>>,
+        call_breaker_address: Address,
+        middleware: Arc<M>,
+        custom_contracts_addresses: HashMap<String, Address>,
         tick_duration: Duration,
         stats_tx: Sender<TimerExecutorStats>,
     ) -> TimerRequestExecutor<M> {
@@ -52,7 +61,9 @@ impl<M: Middleware> TimerRequestExecutor<M> {
         }
         let ret = TimerRequestExecutor {
             id: Uuid::new_v4(),
-            call_breaker_contract,
+            call_breaker_contract: CallBreaker::new(call_breaker_address, middleware.clone()),
+            middleware,
+            custom_contracts_addresses,
             creation_time: creation_time_res.ok().unwrap(),
             tick_duration,
             stats_tx,
@@ -62,12 +73,17 @@ impl<M: Middleware> TimerRequestExecutor<M> {
     }
 
     // Execute the FlashLiquidity executor with given params.
-    pub fn execute(&self, event: ProxyPushedFilter) {
+    pub async fn execute(&self, event: ProxyPushedFilter) {
         println!("Executor {} started", self.id);
         // Initialize timer
         let now = Instant::now();
         // Create a solver of a given type
-        let solver = SolverFactory::new_solver(event.selector.into(), &event.data_values);
+        let solver = LimitOrderSolver::new(
+            event.selector.into(),
+            &self.custom_contracts_addresses,
+            self.middleware.clone(),
+            &event.data_values,
+        );
         if let Err(err) = &solver {
             self.send_stats(
                 String::new(),
@@ -83,7 +99,7 @@ impl<M: Middleware> TimerRequestExecutor<M> {
             Ok(time_limit) => {
                 while now.elapsed() < time_limit {
                     // Actions
-                    match solver.exec_solver_step() {
+                    match solver.exec_solver_step().await {
                         Ok(succeeded) => {
                             if succeeded {
                                 // contract.verify(event.call_objs, returns_bytes, associated_data, hintdices);
@@ -175,32 +191,42 @@ impl<M: Middleware> TimerRequestExecutor<M> {
 
 // The executor frame. It's a container for running executors
 pub struct TimerExecutorFrame<M> {
-    // Call breaker contract
-    call_breaker_contract: Arc<CallBreaker<M>>,
+    // Call breaker contract address
+    call_breaker_address: Address,
+
+    // Middleware instance
+    middleware: Arc<M>,
+
+    // Custom contract addresses
+    custom_contracts_addresses: HashMap<String, Address>,
+
+    // Join set for parallel executing
+    exec_set: Arc<Mutex<JoinSet<()>>>,
 
     // Duration of time ticks
     tick_duration: Duration,
 
     // Stats channels
     stats_tx: Sender<TimerExecutorStats>,
-
-    // Executors Pool
-    pool: ThreadPool,
 }
 
 impl<M: Middleware + 'static> TimerExecutorFrame<M> {
     pub fn new(
-        call_breaker_contract: Arc<CallBreaker<M>>,
+        call_breaker_address: Address,
+        middleware: Arc<M>,
+        custom_contracts_addresses: HashMap<String, Address>,
+        exec_set: Arc<Mutex<JoinSet<()>>>,
         tick_secs: u64,
         tick_nanos: u32,
         stats_tx: Sender<TimerExecutorStats>,
-        n_workers: usize,
     ) -> TimerExecutorFrame<M> {
         let ret = TimerExecutorFrame {
-            call_breaker_contract,
+            call_breaker_address,
+            middleware,
+            custom_contracts_addresses,
+            exec_set,
             tick_duration: Duration::new(tick_secs, tick_nanos),
             stats_tx,
-            pool: ThreadPool::new(n_workers),
         };
 
         ret
@@ -209,20 +235,27 @@ impl<M: Middleware + 'static> TimerExecutorFrame<M> {
     pub fn start_executor(&self, event: ProxyPushedFilter) {
         let dur = self.tick_duration.clone();
         let executor = TimerRequestExecutor::new(
-            self.call_breaker_contract.clone(),
+            self.call_breaker_address,
+            self.middleware.clone(),
+            self.custom_contracts_addresses.clone(),
             dur,
             self.stats_tx.clone(),
         );
         let exec_id = executor.id.clone();
-        self.pool.execute(move || {
-            executor.execute(event);
-        });
-        println!(
-            "New executor {} pushed to pool, active: {}, queued: {}, panicked: {}",
-            exec_id,
-            self.pool.active_count(),
-            self.pool.queued_count(),
-            self.pool.panic_count()
-        );
+        match self.exec_set.lock() {
+            Ok(mut exec_set) => {
+                exec_set.spawn(async move {
+                    executor.execute(event).await;
+                });
+                println!(
+                    "New executor {} is spawned, tasks running: {}",
+                    exec_id,
+                    exec_set.len(),
+                );
+            }
+            Err(err) => {
+                println!("Starting executor {} failed: {}", exec_id, err);
+            }
+        }
     }
 }
