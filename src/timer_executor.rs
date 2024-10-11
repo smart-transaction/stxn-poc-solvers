@@ -10,10 +10,7 @@ use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::{
-    contracts_abi::{
-        laminator::{AdditionalData, ProxyPushedFilter},
-        CallBreaker,
-    },
+    contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
     solvers::limit_order::LimitOrderSolver,
     stats::{ExecStatus, TimerExecutorStats},
 };
@@ -25,11 +22,11 @@ struct TimerRequestExecutor<M> {
     // Unique ID, used for monitoring
     id: Uuid,
 
-    // Call breaker contract
-    call_breaker_contract: CallBreaker<M>,
-
     // Middleware instance
     middleware: Arc<M>,
+
+    // Call Breaker Address
+    call_breaker_address: Address,
 
     // Custom contract addresses
     custom_contracts_addresses: HashMap<String, Address>,
@@ -61,8 +58,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         }
         let ret = TimerRequestExecutor {
             id: Uuid::new_v4(),
-            call_breaker_contract: CallBreaker::new(call_breaker_address, middleware.clone()),
             middleware,
+            call_breaker_address,
             custom_contracts_addresses,
             creation_time: creation_time_res.ok().unwrap(),
             tick_duration,
@@ -79,10 +76,10 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         let now = Instant::now();
         // Create a solver of a given type
         let solver = LimitOrderSolver::new(
-            event.selector.into(),
+            &event,
+            self.call_breaker_address,
             &self.custom_contracts_addresses,
             self.middleware.clone(),
-            &event.data_values,
         );
         if let Err(err) = &solver {
             self.send_stats(
@@ -95,66 +92,84 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
             );
         }
         let solver = solver.ok().unwrap();
-        match solver.time_limit() {
-            Ok(time_limit) => {
-                while now.elapsed() < time_limit {
-                    // Actions
-                    match solver.exec_solver_step().await {
-                        Ok(succeeded) => {
-                            if succeeded {
-                                // contract.verify(event.call_objs, returns_bytes, associated_data, hintdices);
+        if solver.time_limit().is_err() {
+            print!(
+                "Error getting time limit: {}",
+                &solver.time_limit().err().unwrap()
+            );
+            return;
+        }
+        // Tokens reading.
+        let time_limit = solver.time_limit().ok().unwrap();
+        while now.elapsed() < time_limit {
+            // Actions
+            match solver.exec_solver_step().await {
+                Ok(succeeded) => {
+                    if succeeded {
+                        match solver.final_exec().await {
+                            Ok(succeeded) => {
+                                if succeeded {
+                                    self.send_stats(
+                                        solver.app(),
+                                        ExecStatus::SUCCEEDED,
+                                        String::new(),
+                                        &time_limit,
+                                        &now,
+                                        &event.data_values,
+                                    );
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                println!("Error in solver final exec: {}", err);
                                 self.send_stats(
                                     solver.app(),
-                                    ExecStatus::SUCCEEDED,
-                                    String::new(),
+                                    ExecStatus::FAILED,
+                                    err.to_string(),
                                     &time_limit,
                                     &now,
                                     &event.data_values,
                                 );
-                                break;
                             }
                         }
-                        Err(err) => {
-                            print!("Error in solver: {}", err);
-                            self.send_stats(
-                                solver.app(),
-                                ExecStatus::FAILED,
-                                err.to_string(),
-                                &time_limit,
-                                &now,
-                                &event.data_values,
-                            );
-                        }
                     }
-
-                    // Push stats
+                }
+                Err(err) => {
+                    println!("Error in solver step call: {}", err);
                     self.send_stats(
                         solver.app(),
-                        ExecStatus::RUNNING,
-                        String::new(),
+                        ExecStatus::FAILED,
+                        err.to_string(),
                         &time_limit,
                         &now,
                         &event.data_values,
                     );
-
-                    // Wait for the next tick
-                    sleep(self.tick_duration);
                 }
-                // Sending post-exec stats
-                self.send_stats(
-                    solver.app(),
-                    ExecStatus::TIMEOUT,
-                    String::new(),
-                    &time_limit,
-                    &now,
-                    &event.data_values,
-                );
-                println!("Executor {} finished", self.id);
             }
-            Err(err) => {
-                print!("Error getting time limit: {}", err);
-            }
+
+            // Push stats
+            self.send_stats(
+                solver.app(),
+                ExecStatus::RUNNING,
+                String::new(),
+                &time_limit,
+                &now,
+                &event.data_values,
+            );
+
+            // Wait for the next tick
+            sleep(self.tick_duration);
         }
+        // Sending post-exec stats
+        self.send_stats(
+            solver.app(),
+            ExecStatus::TIMEOUT,
+            String::new(),
+            &time_limit,
+            &now,
+            &event.data_values,
+        );
+        println!("Executor {} finished", self.id);
     }
 
     // Send statistics into the stats channel
