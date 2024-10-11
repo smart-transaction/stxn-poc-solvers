@@ -1,5 +1,5 @@
 [package]
-name = "flash-liquidity-poc"
+name = "solver"
 version = "0.1.0"
 edition = "2021"
 
@@ -18,3 +18,4 @@ threadpool = "1.8.1"
 parse_duration = "2.1.1"
 ethers-core = "2.0.14"
 keccak-hash = "0.11.0"
+fixed-hash = "0.8.0"

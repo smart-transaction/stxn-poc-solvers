@@ -1162,26 +1162,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
-name = "flash-liquidity-poc"
-version = "0.1.0"
-dependencies = [
- "bigdecimal",
- "clap",
- "ethers",
- "ethers-core",
- "fatal",
- "futures",
- "keccak-hash",
- "parse_duration",
- "serde",
- "serde_json",
- "threadpool",
- "tokio",
- "uuid 1.10.0",
- "warp",
-]
-
-[[package]]
 name = "flate2"
 version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2994,6 +2974,27 @@ dependencies = [
  "phf",
  "thiserror",
  "unicode-xid",
+]
+
+[[package]]
+name = "solver"
+version = "0.1.0"
+dependencies = [
+ "bigdecimal",
+ "clap",
+ "ethers",
+ "ethers-core",
+ "fatal",
+ "fixed-hash",
+ "futures",
+ "keccak-hash",
+ "parse_duration",
+ "serde",
+ "serde_json",
+ "threadpool",
+ "tokio",
+ "uuid 1.10.0",
+ "warp",
 ]
 
 [[package]]

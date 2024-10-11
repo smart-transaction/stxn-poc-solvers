@@ -1,13 +1,13 @@
 use ethers::{
-    prelude::abigen, providers::Middleware, types::{Address, H256, U256},
-    core::abi::ethabi::ethereum_types::FromDecStrErr,
+    core::abi::ethabi::ethereum_types::FromDecStrErr, prelude::abigen, providers::Middleware, types::{Address, H160, H256, U256}
 };
 use ethers_core::abi;
 use ethers_core::abi::Token;
+use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
 use std::{collections::HashMap, fmt::{self, Display}, sync::Arc, time::Duration};
-
+use std::str::FromStr;
 use crate::contracts_abi::laminator::AdditionalData;
 
 abigen!(
@@ -18,7 +18,7 @@ abigen!(
     "./abi_town/MockDaiWethPool.sol/MockDaiWethPool.json";
 );
 
-const APP_SELECTOR: &str = "LIMIT_ORDER";
+const APP_SELECTOR: &str = "FLASHLIQUIDITY.LIMITORDER";
 const FLASH_LOAN_NAME: &str = "FLASH_LOAN";
 const SWAP_POOL_NAME: &str = "SWAP_POOL";
 
@@ -45,10 +45,15 @@ impl Display for SolverError {
 }
 
 pub struct LimitOrderSolver<M> {
+    // Contracts that are to be called.
     flash_loan_contract: FlashLoan<M>,
     swap_pool_contract: SwapPool<M>,
+
+    // Limit order params
+    give_token: Result<Address, FromHexError>,
+    take_token: Result<Address, FromHexError>,
     amount: Result<U256, FromDecStrErr>,
-    price: Result<U256, FromDecStrErr>,
+    buy_price: Result<U256, FromDecStrErr>,
     slippage: Result<U256, FromDecStrErr>,
     time_limit: Result<Duration, parse_duration::parse::Error>,
 }
@@ -72,8 +77,10 @@ impl<M: Middleware> LimitOrderSolver<M> {
             
             flash_loan_contract: FlashLoan::new(*flash_loan_address.unwrap(), middleware.clone()),
             swap_pool_contract: SwapPool::new(*swap_pool_address.unwrap(), middleware.clone()),
+            give_token: Result::Err(FromHexError::InvalidHexLength),
+            take_token: Result::Err(FromHexError::InvalidHexLength),
             amount: Result::Err(FromDecStrErr::InvalidLength),
-            price: Result::Err(FromDecStrErr::InvalidLength),
+            buy_price: Result::Err(FromDecStrErr::InvalidLength),
             slippage: Result::Err(FromDecStrErr::InvalidLength),
             time_limit: Result::Err(parse_duration::parse::Error::NoValueFound(
                 "Uninitialized value".to_string(),
@@ -81,8 +88,10 @@ impl<M: Middleware> LimitOrderSolver<M> {
         };
         for ad in params {
             match ad.name.as_str() {
+                "give_token" => ret.give_token = H160::from_str(ad.value.as_str()),
+                "take_token" => ret.take_token = H160::from_str(ad.value.as_str()),
                 "amount" => ret.amount = U256::from_dec_str(ad.value.as_str()),
-                "price" => ret.price = U256::from_dec_str(ad.value.as_str()),
+                "buy_price" => ret.buy_price = U256::from_dec_str(ad.value.as_str()),
                 "slippage" => ret.slippage = U256::from_dec_str(ad.value.as_str()),
                 "time_limit" => ret.time_limit = parse_duration::parse(ad.value.as_str()),
                 &_ => {}
@@ -112,7 +121,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
         if let Err(err) = &self.amount {
             return Err(SolverError::ExecError(err.to_string()));
         }
-        if let Err(err) = &self.price {
+        if let Err(err) = &self.buy_price {
             return Err(SolverError::ExecError(err.to_string()));
         }
         // Check the flash loan
@@ -131,7 +140,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
         // Check the price
         match self.swap_pool_contract.get_price_of_dai().call().await {
             Ok(res) => {
-                let price_256 = self.price.as_ref().ok().unwrap();
+                let price_256 = self.buy_price.as_ref().ok().unwrap();
                 if res > *price_256 {
                     return Ok(false);
                 }

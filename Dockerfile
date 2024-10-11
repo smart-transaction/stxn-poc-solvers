@@ -1,4 +1,4 @@
-FROM rust:1.81 as builder
+FROM rust:1.81 AS builder
 
 WORKDIR /usr/src/stxn-poc
 COPY . .
@@ -21,5 +21,7 @@ RUN apt-get install -y ca-certificates
 COPY certificates/* /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 
+COPY --from=builder /usr/local/cargo/bin/solver /usr/local/bin/solver
+
 EXPOSE 3030/tcp
-CMD "./stxn-poc-solvers" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--wallet-private-key=${WALLET_PRIVATE_KEY}"
+CMD "solver" "--port=${PORT}" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--flash-loan-address=${FLASH_LOAN_ADDRESS}" "--swap-pool-address=${SWAP_POOL_ADDRESS}" "--wallet-private-key=${WALLET_PRIVATE_KEY}" "--tick-secs=${TICK_SECS}" "--tick-nanos=${TICK_NANOS}"

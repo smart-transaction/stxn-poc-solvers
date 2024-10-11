@@ -2,14 +2,10 @@ echo "Buiding solver docker image..."
 
 # Choose the environment
 PS3="Please choose the environment: "
-options=("local" "dev" "prod" "quit")
+options=("dev" "prod" "quit")
 select OPT in "${options[@]}"
 do
   case ${OPT} in
-    "local")
-        echo "Using local environment"
-        break
-        ;;
     "dev")
         echo "Using dev environment"
         break
