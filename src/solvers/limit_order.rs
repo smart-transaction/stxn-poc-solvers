@@ -17,11 +17,7 @@ use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
 use std::{
-    collections::HashMap,
-    fmt::{self, Display},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
+    collections::HashMap, fmt::{self, Display}, str::FromStr, sync::Arc, time::Duration
 };
 
 abigen!(
@@ -62,6 +58,7 @@ pub struct LimitOrderSolver<M> {
     // Contract addresses to be called.
     proxy_address: Address,
     call_breaker_address: Address,
+    flash_loan_address: Address,
     swap_pool_address: Address,
 
     // Sequence number for laminator proxy call
@@ -79,6 +76,25 @@ pub struct LimitOrderSolver<M> {
     buy_price: Result<U256, FromDecStrErr>,
     slippage: Result<U256, FromDecStrErr>,
     time_limit: Result<Duration, parse_duration::parse::Error>,
+}
+
+// A clone of the FlashLoanData onchain structure.
+// Cannot be imported by abigen due to visibility restriction.
+// Should be synchronized with the definition in https://github.com/smart-transaction/stxn-contracts-core/blob/6dc025f53af60a0026aa6a4bb0f1d98a881d978a/src/CallBreakerTypes.sol#L23
+struct FlashLoanData {
+    provider: Address,
+    amount_a: U256,
+    amount_b: U256,
+}
+
+impl AbiEncode for FlashLoanData {
+    fn encode(self) -> Vec<u8> {
+        return abi::encode(&[
+            Token::Bytes(self.provider.encode()),
+            Token::Bytes(self.amount_a.encode()),
+            Token::Bytes(self.amount_b.encode()),
+        ]);
+    }
 }
 
 impl<M: Middleware> LimitOrderSolver<M> {
@@ -108,6 +124,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
         let mut ret = LimitOrderSolver {
             proxy_address: event.proxy_address,
             call_breaker_address,
+            flash_loan_address: *flash_loan_address.unwrap(),
             swap_pool_address: *swap_pool_address.unwrap(),
             call_breaker_contract: CallBreaker::new(call_breaker_address, middleware.clone()),
             flash_loan_contract: FlashLoan::new(*flash_loan_address.unwrap(), middleware.clone()),
@@ -230,6 +247,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
     }
 
     pub async fn final_exec(&self) -> Result<bool, SolverError> {
+        let hardcoded_weth_liquidity: U256 = 100.into();
+        let hardcoded_dai_liquidity: U256 = 1000.into();
         let call_objects = vec![
             CallObject {
                 amount: 0.into(),
@@ -237,7 +256,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 gas: 1000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
                     spender: self.give_token.ok().unwrap(),
-                    amount: 1000.into(),
+                    amount: hardcoded_dai_liquidity,
                 })
                 .encode()
                 .into(),
@@ -248,7 +267,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 gas: 1000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
                     spender: self.take_token.ok().unwrap(),
-                    amount: 100.into(),
+                    amount: hardcoded_weth_liquidity,
                 })
                 .encode()
                 .into(),
@@ -260,8 +279,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 callvalue: SwapPoolCalls::ProvideLiquidityToDAIETHPool(
                     ProvideLiquidityToDAIETHPoolCall {
                         provider: self.call_breaker_address,
-                        amount_0_in: 1000.into(),
-                        amount_1_in: 100.into(),
+                        amount_0_in: hardcoded_dai_liquidity,
+                        amount_1_in: hardcoded_weth_liquidity,
                     },
                 )
                 .encode()
@@ -294,8 +313,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 callvalue: SwapPoolCalls::WithdrawLiquidityFromDAIETHPool(
                     WithdrawLiquidityFromDAIETHPoolCall {
                         provider: self.call_breaker_address,
-                        amount_0_out: 1000.into(),
-                        amount_1_out: 100.into(),
+                        amount_0_out: hardcoded_dai_liquidity,
+                        amount_1_out: hardcoded_weth_liquidity,
                     },
                 )
                 .encode()
@@ -370,13 +389,19 @@ impl<M: Middleware> LimitOrderSolver<M> {
             Token::Bytes(hintdices_keys.encode()),
             Token::Bytes(hintdices_values.encode()),
         ]);
+        let flash_loan_data = FlashLoanData {
+            provider: self.flash_loan_address,
+            amount_a: hardcoded_dai_liquidity,
+            amount_b: hardcoded_weth_liquidity,
+        }.encode();
         match self
             .call_breaker_contract
-            .execute_and_verify(
+            .execute_and_verify_with_flashloan(
                 call_objects.encode().into(),
                 return_objects.encode().into(),
                 associated_data.into(),
                 hintdices.into(),
+                flash_loan_data.into(),
             )
             .call()
             .await
