@@ -81,6 +81,8 @@ async fn main() {
         );
     }
     println!("Connected successfully!");
+
+    let wallet_address = wallet.address();
     let ws_client = Arc::new(SignerMiddleware::new(provider_res.ok().unwrap(), wallet));
 
     // Addresses of specific solvers contracts.
@@ -90,6 +92,7 @@ async fn main() {
 
     let exec_frame = TimerExecutorFrame::new(
         args.call_breaker_address,
+        wallet_address,
         ws_client.clone(),
         custom_contracts_addresses,
         exec_set.clone(),

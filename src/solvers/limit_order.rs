@@ -17,7 +17,11 @@ use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
 use std::{
-    collections::HashMap, fmt::{self, Display}, str::FromStr, sync::Arc, time::Duration
+    collections::HashMap,
+    fmt::{self, Display},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
 
 abigen!(
@@ -55,6 +59,9 @@ impl Display for SolverError {
 }
 
 pub struct LimitOrderSolver<M> {
+    // Solver address
+    solver_address: Address,
+
     // Contract addresses to be called.
     proxy_address: Address,
     call_breaker_address: Address,
@@ -80,7 +87,7 @@ pub struct LimitOrderSolver<M> {
 
 // A clone of the FlashLoanData onchain structure.
 // Cannot be imported by abigen due to visibility restriction.
-// Should be synchronized with the definition in https://github.com/smart-transaction/stxn-contracts-core/blob/6dc025f53af60a0026aa6a4bb0f1d98a881d978a/src/CallBreakerTypes.sol#L23
+// Should be synchronized with the definition in https://github.com/smart-transaction/stxn-contracts-core/blob/6dc025f53af60a0026aa6a4bb0f1d98a881d978a/src/CallBreakerTypes.sol
 struct FlashLoanData {
     provider: Address,
     amount_a: U256,
@@ -101,6 +108,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
     pub fn new(
         event: &ProxyPushedFilter,
         call_breaker_address: Address,
+        solver_address: Address,
         extra_contract_addresses: &HashMap<String, Address>,
         middleware: Arc<M>,
     ) -> Result<LimitOrderSolver<M>, SolverError> {
@@ -124,6 +132,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
         let mut ret = LimitOrderSolver {
             proxy_address: event.proxy_address,
             call_breaker_address,
+            solver_address,
             flash_loan_address: *flash_loan_address.unwrap(),
             swap_pool_address: *swap_pool_address.unwrap(),
             call_breaker_contract: CallBreaker::new(call_breaker_address, middleware.clone()),
@@ -356,7 +365,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
             keccak("pullIndex".encode()).as_fixed_bytes().into(),
         ];
         let associated_data_values = vec![
-            self.proxy_address.encode(), // Replace with solver_address
+            self.solver_address.encode(),
             self.sequence_number.encode(),
         ];
         let associated_data = abi::encode(&[
@@ -393,7 +402,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
             provider: self.flash_loan_address,
             amount_a: hardcoded_dai_liquidity,
             amount_b: hardcoded_weth_liquidity,
-        }.encode();
+        }
+        .encode();
         match self
             .call_breaker_contract
             .execute_and_verify_with_flashloan(
