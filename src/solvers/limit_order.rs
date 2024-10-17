@@ -25,6 +25,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tokio::sync::Mutex;
 
 abigen!(
     FlashLoan,
@@ -43,6 +44,8 @@ pub enum SolverError {
     ParamError(String),
     ExecError(String),
 }
+
+static TRANSACTION_MUTEX: Mutex<bool> = Mutex::const_new(true);
 
 impl Display for SolverError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
@@ -318,10 +321,10 @@ impl<M: Middleware> LimitOrderSolver<M> {
         ];
         let return_objects_from_pull = vec![
             ReturnObject {
-                returnvalue: Bytes::new(),
+                returnvalue: true.encode().into(),
             },
             ReturnObject {
-                returnvalue: true.encode().into(),
+                returnvalue: Bytes::new(),
             },
         ];
         let return_objects = vec![
@@ -335,7 +338,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 returnvalue: Bytes::new(),
             },
             ReturnObject {
-                returnvalue: return_objects_from_pull.encode().into(),
+                returnvalue: abi::encode(&[Token::Bytes(return_objects_from_pull.encode())]).into(),
             },
             ReturnObject {
                 returnvalue: Bytes::new(),
@@ -384,14 +387,15 @@ impl<M: Middleware> LimitOrderSolver<M> {
         .into();
         let flash_loan_data: Bytes = FlashLoanData {
             provider: self.flash_loan_address,
-            amount_a: hardcoded_dai_liquidity.into(),
-            amount_b: hardcoded_weth_liquidity.into(),
+            amount_a: dai_liquidity_wei.into(),
+            amount_b: weth_liquidity_wei.into(),
         }
         .encode()
         .into();
 
         let call_bytes: Bytes = call_objects.encode().into();
         let return_bytes: Bytes = return_objects.encode().into();
+        let _guard = TRANSACTION_MUTEX.lock().await;
         match self
             .call_breaker_contract
             .execute_and_verify_with_flashloan(
@@ -409,9 +413,9 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 println!("Transaction is sent, txhash: {}", pending.tx_hash());
                 match pending.await {
                     Ok(receipt) => {
-                        println!("Receipt: {:#?}", receipt);
                         if let Some(receipt) = receipt {
                             if let Some(status) = receipt.status {
+                                println!("Transaction status: {}", status);
                                 return Ok(status != 0.into());
                             }
                         }

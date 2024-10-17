@@ -1,4 +1,4 @@
-use ethers::{abi::Address, providers::Middleware};
+use ethers::{abi::Address, providers::Middleware, types::U256};
 use fatal::fatal;
 use std::{
     collections::HashMap,
@@ -90,6 +90,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         if let Err(err) = &solver {
             println!("Error on creating a solver: {}", err);
             self.send_stats(
+                event.sequence_number,
                 String::new(),
                 Status::Failed,
                 TransactionStatus::NotExecuted,
@@ -120,6 +121,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                             Ok(succeeded) => {
                                 if succeeded {
                                     self.send_stats(
+                                        event.sequence_number,
                                         solver.app(),
                                         Status::Succeeded,
                                         TransactionStatus::Succeeded,
@@ -132,6 +134,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                     return;
                                 } else {
                                     self.send_stats(
+                                        event.sequence_number,
                                         solver.app(),
                                         Status::Running,
                                         TransactionStatus::TransactionPending,
@@ -146,8 +149,9 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                             Err(err) => {
                                 println!("Error in solver final exec: {}", err);
                                 self.send_stats(
+                                    event.sequence_number,
                                     solver.app(),
-                                    Status::Failed,
+                                    Status::Running,
                                     TransactionStatus::TransactionFailed,
                                     err.to_string(),
                                     &time_limit,
@@ -159,6 +163,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                         }
                     } else {
                         self.send_stats(
+                            event.sequence_number,
                             solver.app(),
                             Status::Running,
                             TransactionStatus::StepPending,
@@ -173,6 +178,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                 Err(err) => {
                     println!("Error in solver step call: {}", err);
                     self.send_stats(
+                        event.sequence_number,
                         solver.app(),
                         Status::Failed,
                         TransactionStatus::StepFailed,
@@ -189,6 +195,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         }
         // Sending post-exec stats
         self.send_stats(
+            event.sequence_number,
             solver.app(),
             Status::Timeout,
             last_transaction_status,
@@ -203,6 +210,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
     // Send statistics into the stats channel
     fn send_stats(
         &self,
+        sequence_number: U256,
         app: String,
         status: Status,
         transaction_status: TransactionStatus,
@@ -219,6 +227,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         }
         let res = self.stats_tx.send(TimerExecutorStats {
             id: self.id,
+            sequence_number: sequence_number.as_u32(),
             app,
             creation_time: self.creation_time,
             status,

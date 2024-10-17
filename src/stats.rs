@@ -33,6 +33,7 @@ pub enum TransactionStatus {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimerExecutorStats {
     pub id: Uuid,
+    pub sequence_number: u32,
     pub app: String,
     pub creation_time: Duration,
     pub status: Status,

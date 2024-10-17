@@ -87,8 +87,7 @@ async fn main() {
         provider_res
             .ok()
             .unwrap()
-            .nonce_manager(wallet_address)
-            .with_signer(wallet),
+            .with_signer(wallet)
     );
 
     // Addresses of specific solvers contracts.
