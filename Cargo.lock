@@ -2988,6 +2988,7 @@ dependencies = [
  "fixed-hash",
  "futures",
  "keccak-hash",
+ "num-bigint 0.4.6",
  "parse_duration",
  "serde",
  "serde_json",

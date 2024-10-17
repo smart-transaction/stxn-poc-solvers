@@ -1,7 +1,7 @@
 use clap::Parser;
 use ethers::{
     core::types::Address,
-    middleware::SignerMiddleware,
+    middleware::MiddlewareBuilder,
     providers::{Middleware, Provider, Ws},
     signers::{LocalWallet, Signer},
 };
@@ -17,7 +17,7 @@ use tokio::task::JoinSet;
 use warp::Filter;
 
 use crate::laminator_listener::LaminatorListener;
-use crate::stats::{get_stats_json, run_stats_receive, ExecStatus, TimerExecutorStats};
+use crate::stats::{get_stats_json, run_stats_receive, TimerExecutorStats};
 use crate::timer_executor::TimerExecutorFrame;
 
 mod contracts_abi;
@@ -83,7 +83,13 @@ async fn main() {
     println!("Connected successfully!");
 
     let wallet_address = wallet.address();
-    let ws_client = Arc::new(SignerMiddleware::new(provider_res.ok().unwrap(), wallet));
+    let provider = Arc::new(
+        provider_res
+            .ok()
+            .unwrap()
+            .nonce_manager(wallet_address)
+            .with_signer(wallet),
+    );
 
     // Addresses of specific solvers contracts.
     let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();
@@ -93,18 +99,17 @@ async fn main() {
     let exec_frame = TimerExecutorFrame::new(
         args.call_breaker_address,
         wallet_address,
-        ws_client.clone(),
+        provider.clone(),
         custom_contracts_addresses,
         exec_set.clone(),
         args.tick_secs,
         args.tick_nanos,
-        stats_tx,
+        stats_tx.clone(),
     );
 
-    let mut listener =
-        LaminatorListener::new(args.laminator_address, ws_client.clone(), exec_frame);
+    let mut listener = LaminatorListener::new(args.laminator_address, provider.clone(), exec_frame);
 
-    let block_res = ws_client.provider().get_block_number().await;
+    let block_res = provider.provider().get_block_number().await;
     if block_res.is_err() {
         fatal!("Error getting block: {}", block_res.err().unwrap());
     }
@@ -127,8 +132,7 @@ async fn main() {
     let default_route = warp::path::end().map(|| warp::reply::html("FlashLiquidity Solver"));
     let stats = warp::path("stats").map(move || {
         let stats_map = Arc::clone(&stats_map);
-        let mut filter = HashSet::new();
-        filter.insert(ExecStatus::RUNNING);
+        let filter = HashSet::new();
         get_stats_json(stats_map, filter)
     });
     let routes = default_route.or(stats);

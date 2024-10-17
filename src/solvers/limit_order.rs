@@ -11,8 +11,10 @@ use ethers::{
     providers::Middleware,
     types::{Address, Bytes, H160, H256, U256},
 };
-use ethers_core::abi;
-use ethers_core::abi::Token;
+use ethers_core::{
+    abi::{self, Token},
+    utils::parse_units,
+};
 use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
@@ -73,7 +75,6 @@ pub struct LimitOrderSolver<M> {
 
     // Contracts that are to be called.
     call_breaker_contract: CallBreaker<M>,
-    flash_loan_contract: FlashLoan<M>,
     swap_pool_contract: SwapPool<M>,
 
     // Limit order params
@@ -112,6 +113,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
         extra_contract_addresses: &HashMap<String, Address>,
         middleware: Arc<M>,
     ) -> Result<LimitOrderSolver<M>, SolverError> {
+        println!("Event received: {}", event);
         let flash_liquidity_selector = Self::selector();
         if flash_liquidity_selector != event.selector.into() {
             return Err(SolverError::UnknownSelector(event.selector.into()));
@@ -136,7 +138,6 @@ impl<M: Middleware> LimitOrderSolver<M> {
             flash_loan_address: *flash_loan_address.unwrap(),
             swap_pool_address: *swap_pool_address.unwrap(),
             call_breaker_contract: CallBreaker::new(call_breaker_address, middleware.clone()),
-            flash_loan_contract: FlashLoan::new(*flash_loan_address.unwrap(), middleware.clone()),
             swap_pool_contract: SwapPool::new(*swap_pool_address.unwrap(), middleware.clone()),
             sequence_number: event.sequence_number,
             give_token: Result::Err(FromHexError::InvalidHexLength),
@@ -219,23 +220,6 @@ impl<M: Middleware> LimitOrderSolver<M> {
         if let Err(err) = &self.buy_price {
             return Err(SolverError::ExecError(err.to_string()));
         }
-        // Check the flash loan
-        match self.flash_loan_contract.max_flash_loan().call().await {
-            Ok(res) => {
-                let dai_balance = res.1;
-                let desired_amount = *self.amount.as_ref().ok().unwrap();
-                if dai_balance < desired_amount {
-                    println!(
-                        "The maximum loan amount {} is not enough, needed {}",
-                        dai_balance, desired_amount
-                    );
-                    return Ok(false);
-                }
-            }
-            Err(err) => {
-                return Err(SolverError::ExecError(err.to_string()));
-            }
-        }
         // Check the price
         match self.swap_pool_contract.get_price_of_weth().call().await {
             Ok(current_price) => {
@@ -256,16 +240,18 @@ impl<M: Middleware> LimitOrderSolver<M> {
     }
 
     pub async fn final_exec(&self) -> Result<bool, SolverError> {
-        let hardcoded_weth_liquidity: U256 = 100.into();
-        let hardcoded_dai_liquidity: U256 = 1000.into();
+        let hardcoded_weth_liquidity = 100;
+        let hardcoded_dai_liquidity = 1000;
+        let dai_liquidity_wei = parse_units(hardcoded_dai_liquidity, "ether").ok().unwrap();
+        let weth_liquidity_wei = parse_units(hardcoded_weth_liquidity, "ether").ok().unwrap();
         let call_objects = vec![
             CallObject {
                 amount: 0.into(),
                 addr: self.give_token.ok().unwrap(),
                 gas: 1000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
-                    spender: self.give_token.ok().unwrap(),
-                    amount: hardcoded_dai_liquidity,
+                    spender: self.swap_pool_address,
+                    amount: dai_liquidity_wei.into(),
                 })
                 .encode()
                 .into(),
@@ -275,8 +261,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 addr: self.take_token.ok().unwrap(),
                 gas: 1000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
-                    spender: self.take_token.ok().unwrap(),
-                    amount: hardcoded_weth_liquidity,
+                    spender: self.swap_pool_address,
+                    amount: weth_liquidity_wei.into(),
                 })
                 .encode()
                 .into(),
@@ -288,8 +274,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 callvalue: SwapPoolCalls::ProvideLiquidityToDAIETHPool(
                     ProvideLiquidityToDAIETHPoolCall {
                         provider: self.call_breaker_address,
-                        amount_0_in: hardcoded_dai_liquidity,
-                        amount_1_in: hardcoded_weth_liquidity,
+                        amount_0_in: hardcoded_dai_liquidity.into(),
+                        amount_1_in: hardcoded_weth_liquidity.into(),
                     },
                 )
                 .encode()
@@ -322,8 +308,8 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 callvalue: SwapPoolCalls::WithdrawLiquidityFromDAIETHPool(
                     WithdrawLiquidityFromDAIETHPoolCall {
                         provider: self.call_breaker_address,
-                        amount_0_out: hardcoded_dai_liquidity,
-                        amount_1_out: hardcoded_weth_liquidity,
+                        amount_0_out: hardcoded_dai_liquidity.into(),
+                        amount_1_out: hardcoded_weth_liquidity.into(),
                     },
                 )
                 .encode()
@@ -349,9 +335,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 returnvalue: Bytes::new(),
             },
             ReturnObject {
-                returnvalue: Bytes::from(return_objects_from_pull.encode())
-                    .encode()
-                    .into(),
+                returnvalue: return_objects_from_pull.encode().into(),
             },
             ReturnObject {
                 returnvalue: Bytes::new(),
@@ -364,14 +348,13 @@ impl<M: Middleware> LimitOrderSolver<M> {
             keccak("tipYourBartender".encode()).as_fixed_bytes().into(),
             keccak("pullIndex".encode()).as_fixed_bytes().into(),
         ];
-        let associated_data_values = vec![
-            self.solver_address.encode(),
-            self.sequence_number.encode(),
-        ];
-        let associated_data = abi::encode(&[
+        let associated_data_values =
+            vec![self.solver_address.encode(), self.sequence_number.encode()];
+        let associated_data: Bytes = abi::encode(&[
             Token::Bytes(associated_data_keys.encode()),
             Token::Bytes(associated_data_values.encode()),
-        ]);
+        ])
+        .into();
         let hintdices_keys: Vec<H256> = vec![
             keccak(call_objects[0].clone().encode())
                 .as_fixed_bytes()
@@ -394,30 +377,53 @@ impl<M: Middleware> LimitOrderSolver<M> {
         ];
         let hintdices_values: Vec<U256> =
             vec![0.into(), 1.into(), 2.into(), 3.into(), 4.into(), 5.into()];
-        let hintdices = abi::encode(&[
+        let hintdices: Bytes = abi::encode(&[
             Token::Bytes(hintdices_keys.encode()),
             Token::Bytes(hintdices_values.encode()),
-        ]);
-        let flash_loan_data = FlashLoanData {
+        ])
+        .into();
+        let flash_loan_data: Bytes = FlashLoanData {
             provider: self.flash_loan_address,
-            amount_a: hardcoded_dai_liquidity,
-            amount_b: hardcoded_weth_liquidity,
+            amount_a: hardcoded_dai_liquidity.into(),
+            amount_b: hardcoded_weth_liquidity.into(),
         }
-        .encode();
+        .encode()
+        .into();
+
+        let call_bytes: Bytes = call_objects.encode().into();
+        let return_bytes: Bytes = return_objects.encode().into();
         match self
             .call_breaker_contract
             .execute_and_verify_with_flashloan(
-                call_objects.encode().into(),
-                return_objects.encode().into(),
-                associated_data.into(),
-                hintdices.into(),
-                flash_loan_data.into(),
+                call_bytes,
+                return_bytes,
+                associated_data,
+                hintdices,
+                flash_loan_data,
             )
-            .call()
+            .gas(10000000)
+            .send()
             .await
         {
-            Ok(_) => {
-                return Ok(true);
+            Ok(pending) => {
+                println!("Transaction is sent, txhash: {}", pending.tx_hash());
+                match pending.await {
+                    Ok(receipt) => {
+                        println!("Receipt: {:#?}", receipt);
+                        if let Some(receipt) = receipt {
+                            if let Some(status) = receipt.status {
+                                return Ok(status != 0.into());
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    Err(err) => {
+                        return Err(SolverError::ExecError(format!(
+                            "Final execution error: {}",
+                            err
+                        )));
+                    }
+                }
             }
             Err(err) => {
                 return Err(SolverError::ExecError(format!(

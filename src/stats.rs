@@ -13,11 +13,21 @@ use crate::contracts_abi::laminator::AdditionalData;
 
 // Executor statistics
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub enum ExecStatus {
-    RUNNING,
-    SUCCEEDED,
-    FAILED,
-    TIMEOUT,
+pub enum Status {
+    Running,
+    Succeeded,
+    Failed,
+    Timeout,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+pub enum TransactionStatus {
+    Succeeded,
+    StepFailed,
+    TransactionFailed,
+    StepPending,
+    TransactionPending,
+    NotExecuted,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,7 +35,8 @@ pub struct TimerExecutorStats {
     pub id: Uuid,
     pub app: String,
     pub creation_time: Duration,
-    pub status: ExecStatus,
+    pub status: Status,
+    pub transaction_status: TransactionStatus,
     pub message: String,
     pub params: Vec<AdditionalData>,
     pub elapsed: Duration,
@@ -34,7 +45,7 @@ pub struct TimerExecutorStats {
 
 pub fn get_stats_json(
     stats: Arc<Mutex<HashMap<Uuid, TimerExecutorStats>>>,
-    filter: HashSet<ExecStatus>,
+    filter: HashSet<Status>,
 ) -> Json {
     match stats.lock() {
         Ok(stats) => {

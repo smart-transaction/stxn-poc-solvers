@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{
     contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
     solvers::limit_order::LimitOrderSolver,
-    stats::{ExecStatus, TimerExecutorStats},
+    stats::{Status, TimerExecutorStats, TransactionStatus},
 };
 
 // The executor combined with a timer, PoC version.
@@ -88,14 +88,17 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
             self.middleware.clone(),
         );
         if let Err(err) = &solver {
+            println!("Error on creating a solver: {}", err);
             self.send_stats(
                 String::new(),
-                ExecStatus::FAILED,
+                Status::Failed,
+                TransactionStatus::NotExecuted,
                 err.to_string(),
                 &Duration::new(0, 0),
                 &now,
                 &event.data_values,
             );
+            return;
         }
         let solver = solver.ok().unwrap();
         if solver.time_limit().is_err() {
@@ -107,6 +110,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         }
         // Tokens reading.
         let time_limit = solver.time_limit().ok().unwrap();
+        let mut last_transaction_status = TransactionStatus::NotExecuted;
         while now.elapsed() < time_limit {
             // Actions
             match solver.exec_solver_step().await {
@@ -117,79 +121,98 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                 if succeeded {
                                     self.send_stats(
                                         solver.app(),
-                                        ExecStatus::SUCCEEDED,
+                                        Status::Succeeded,
+                                        TransactionStatus::Succeeded,
                                         String::new(),
                                         &time_limit,
                                         &now,
                                         &event.data_values,
                                     );
-                                    break;
+                                    println!("Executor {} successfully finished", self.id);
+                                    return;
+                                } else {
+                                    self.send_stats(
+                                        solver.app(),
+                                        Status::Running,
+                                        TransactionStatus::TransactionPending,
+                                        String::new(),
+                                        &time_limit,
+                                        &now,
+                                        &event.data_values,
+                                    );
+                                    last_transaction_status = TransactionStatus::TransactionPending;
                                 }
                             }
                             Err(err) => {
                                 println!("Error in solver final exec: {}", err);
                                 self.send_stats(
                                     solver.app(),
-                                    ExecStatus::FAILED,
+                                    Status::Failed,
+                                    TransactionStatus::TransactionFailed,
                                     err.to_string(),
                                     &time_limit,
                                     &now,
                                     &event.data_values,
                                 );
+                                last_transaction_status = TransactionStatus::TransactionFailed;
                             }
                         }
+                    } else {
+                        self.send_stats(
+                            solver.app(),
+                            Status::Running,
+                            TransactionStatus::StepPending,
+                            String::new(),
+                            &time_limit,
+                            &now,
+                            &event.data_values,
+                        );
+                        last_transaction_status = TransactionStatus::StepPending;
                     }
                 }
                 Err(err) => {
                     println!("Error in solver step call: {}", err);
                     self.send_stats(
                         solver.app(),
-                        ExecStatus::FAILED,
+                        Status::Failed,
+                        TransactionStatus::StepFailed,
                         err.to_string(),
                         &time_limit,
                         &now,
                         &event.data_values,
                     );
+                    last_transaction_status = TransactionStatus::StepFailed;
                 }
             }
-
-            // Push stats
-            self.send_stats(
-                solver.app(),
-                ExecStatus::RUNNING,
-                String::new(),
-                &time_limit,
-                &now,
-                &event.data_values,
-            );
-
             // Wait for the next tick
             sleep(self.tick_duration);
         }
         // Sending post-exec stats
         self.send_stats(
             solver.app(),
-            ExecStatus::TIMEOUT,
+            Status::Timeout,
+            last_transaction_status,
             String::new(),
             &time_limit,
             &now,
             &event.data_values,
         );
-        println!("Executor {} finished", self.id);
+        println!("Executor {} finished by timeout", self.id);
     }
 
     // Send statistics into the stats channel
     fn send_stats(
         &self,
         app: String,
-        status: ExecStatus,
+        status: Status,
+        transaction_status: TransactionStatus,
         message: String,
         time_limit: &Duration,
         now: &Instant,
         params: &Vec<AdditionalData>,
     ) {
         let remaining;
-        if status == ExecStatus::RUNNING {
+        if status == Status::Running {
             remaining = time_limit.abs_diff(now.elapsed());
         } else {
             remaining = Duration::new(0, 0);
@@ -199,6 +222,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
             app,
             creation_time: self.creation_time,
             status,
+            transaction_status,
             message,
             params: params.clone(),
             elapsed: now.elapsed(),
@@ -258,7 +282,7 @@ impl<M: Middleware + 'static> TimerExecutorFrame<M> {
         ret
     }
 
-    pub fn start_executor(&self, event: ProxyPushedFilter) {
+    pub async fn start_executor(&self, event: ProxyPushedFilter) {
         let dur = self.tick_duration.clone();
         let executor = TimerRequestExecutor::new(
             self.call_breaker_address,
