@@ -101,7 +101,7 @@ services:
       - TICK_SECS=${TICK_SECS}
       - TICK_NANOS=${TICK_NANOS}
     ports:
-      - 8080:8080
+      - ${PORT}:${PORT}
 
 COMPOSE
 
