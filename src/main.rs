@@ -117,7 +117,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(|| async { "Smart Transactions Solver" }))
-        .route("/stats", get(get_stats_json))
+        .route("/stats/limit_order", get(get_stats_json))
         .with_state(stats_map);
 
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{}", args.port)).await.unwrap();
