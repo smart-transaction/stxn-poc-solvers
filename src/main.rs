@@ -137,5 +137,6 @@ async fn main() {
     let routes = default_route.or(stats);
 
     // Start all services
+    println!("Starting server at port {}", args.port);
     warp::serve(routes).run(([127, 0, 0, 1], args.port)).await;
 }

@@ -26,7 +26,7 @@ do
   case ${OPT} in
     "dev")
         echo "Using dev environment"
-        PORT=8080
+        PORT=9999
         CHAIN_ID=21363
         WS_CHAIN_URL=wss://service.lestnet.org:8888/
         LAMINATOR_ADDRESS=0xF8f81f532d1f2787BECd3ecD0734e9BEd1241313
