@@ -9,7 +9,7 @@ use ethers::{
     core::abi::ethabi::ethereum_types::FromDecStrErr,
     prelude::abigen,
     providers::Middleware,
-    types::{Address, BlockId, BlockNumber, Bytes, H160, H256, U256},
+    types::{Address, Bytes, H160, H256, U256},
 };
 use ethers_core::{
     abi::{self, Token},
@@ -79,9 +79,6 @@ pub struct LimitOrderSolver<M> {
     // Contracts that are to be called.
     call_breaker_contract: CallBreaker<M>,
     swap_pool_contract: SwapPool<M>,
-
-    // Middleware
-    middleware: Arc<M>,
 
     // Limit order params
     pub give_token: Result<Address, FromHexError>,
@@ -154,7 +151,6 @@ impl<M: Middleware> LimitOrderSolver<M> {
             time_limit: Result::Err(parse_duration::parse::Error::NoValueFound(
                 "Uninitialized value".to_string(),
             )),
-            middleware,
         };
         // Extract parameters.
         for ad in &event.data_values {
@@ -401,11 +397,6 @@ impl<M: Middleware> LimitOrderSolver<M> {
         let return_bytes: Bytes = return_objects.encode().into();
         {
             let _guard = TRANSACTION_MUTEX.lock().await;
-            let nonce = self.middleware.get_transaction_count(self.solver_address, Some(BlockId::Number(BlockNumber::Latest))).await;
-            if let Err(err) = nonce {
-                return Err(SolverError::ExecError(format!("Error getting nonce: {}", err)));
-            }
-            println!("Next nonce: {}", nonce.as_ref().ok().unwrap());
             match self
                 .call_breaker_contract
                 .execute_and_verify_with_flashloan(
@@ -416,7 +407,6 @@ impl<M: Middleware> LimitOrderSolver<M> {
                     flash_loan_data,
                 )
                 .gas(10000000)
-                .nonce(nonce.ok().unwrap())
                 .send()
                 .await
             {
