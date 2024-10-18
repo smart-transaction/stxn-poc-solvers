@@ -9,7 +9,7 @@ use ethers::{
     core::abi::ethabi::ethereum_types::FromDecStrErr,
     prelude::abigen,
     providers::Middleware,
-    types::{Address, Bytes, H160, H256, U256},
+    types::{Address, BlockId, BlockNumber, Bytes, H160, H256, U256},
 };
 use ethers_core::{
     abi::{self, Token},
@@ -79,6 +79,9 @@ pub struct LimitOrderSolver<M> {
     // Contracts that are to be called.
     call_breaker_contract: CallBreaker<M>,
     swap_pool_contract: SwapPool<M>,
+
+    // Middleware
+    middleware: Arc<M>,
 
     // Limit order params
     pub give_token: Result<Address, FromHexError>,
@@ -151,6 +154,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
             time_limit: Result::Err(parse_duration::parse::Error::NoValueFound(
                 "Uninitialized value".to_string(),
             )),
+            middleware,
         };
         // Extract parameters.
         for ad in &event.data_values {
@@ -395,46 +399,54 @@ impl<M: Middleware> LimitOrderSolver<M> {
 
         let call_bytes: Bytes = call_objects.encode().into();
         let return_bytes: Bytes = return_objects.encode().into();
-        let _guard = TRANSACTION_MUTEX.lock().await;
-        match self
-            .call_breaker_contract
-            .execute_and_verify_with_flashloan(
-                call_bytes,
-                return_bytes,
-                associated_data,
-                hintdices,
-                flash_loan_data,
-            )
-            .gas(10000000)
-            .send()
-            .await
         {
-            Ok(pending) => {
-                println!("Transaction is sent, txhash: {}", pending.tx_hash());
-                match pending.await {
-                    Ok(receipt) => {
-                        if let Some(receipt) = receipt {
-                            if let Some(status) = receipt.status {
-                                println!("Transaction status: {}", status);
-                                return Ok(status != 0.into());
+            let _guard = TRANSACTION_MUTEX.lock().await;
+            let nonce = self.middleware.get_transaction_count(self.solver_address, Some(BlockId::Number(BlockNumber::Latest))).await;
+            if let Err(err) = nonce {
+                return Err(SolverError::ExecError(format!("Error getting nonce: {}", err)));
+            }
+            println!("Next nonce: {}", nonce.as_ref().ok().unwrap());
+            match self
+                .call_breaker_contract
+                .execute_and_verify_with_flashloan(
+                    call_bytes,
+                    return_bytes,
+                    associated_data,
+                    hintdices,
+                    flash_loan_data,
+                )
+                .gas(10000000)
+                .nonce(nonce.ok().unwrap())
+                .send()
+                .await
+            {
+                Ok(pending) => {
+                    println!("Transaction is sent, txhash: {}", pending.tx_hash());
+                    match pending.await {
+                        Ok(receipt) => {
+                            if let Some(receipt) = receipt {
+                                if let Some(status) = receipt.status {
+                                    println!("Transaction status: {}", status);
+                                    return Ok(status != 0.into());
+                                }
                             }
+                            return Ok(false);
                         }
-                        return Ok(false);
-                    }
-                    Err(err) => {
-                        return Err(SolverError::ExecError(format!(
-                            "Final execution error: {}",
-                            err
-                        )));
+                        Err(err) => {
+                            return Err(SolverError::ExecError(format!(
+                                "Final execution error: {}",
+                                err
+                            )));
+                        }
                     }
                 }
+                Err(err) => {
+                    return Err(SolverError::ExecError(format!(
+                        "Final execution error: {}",
+                        err
+                    )));
+                }
             }
-            Err(err) => {
-                return Err(SolverError::ExecError(format!(
-                    "Final execution error: {}",
-                    err
-                )));
-            }
-        }
+        };
     }
 }

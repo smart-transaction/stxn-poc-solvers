@@ -1,3 +1,4 @@
+use axum::{routing::{get, Router}, serve};
 use clap::Parser;
 use ethers::{
     core::types::Address,
@@ -7,14 +8,10 @@ use ethers::{
 };
 use fatal::fatal;
 use std::{
-    collections::{HashMap, HashSet},
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
-    },
+    collections::HashMap,
+    sync::Arc,
 };
-use tokio::task::JoinSet;
-use warp::Filter;
+use tokio::{net::TcpListener, sync::{mpsc::{self, Receiver, Sender}, Mutex}, task::JoinSet};
 
 use crate::laminator_listener::LaminatorListener;
 use crate::stats::{get_stats_json, run_stats_receive, TimerExecutorStats};
@@ -65,8 +62,8 @@ async fn main() {
     let args = Args::parse();
     let wallet = args.wallet_private_key.with_chain_id(args.chain_id);
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
-    let (stats_tx, stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
-        mpsc::channel();
+    let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
+        mpsc::channel(100);
     let exec_set = Arc::new(Mutex::new(JoinSet::new()));
 
     println!(
@@ -115,28 +112,26 @@ async fn main() {
     let block = block_res.ok().unwrap();
 
     let stats_map_copy = Arc::clone(&stats_map);
-    match exec_set.lock() {
-        Ok(mut exec_set) => {
-            exec_set.spawn(async move {
-                listener.listen(block).await;
-            });
-            exec_set.spawn(async move {
-                run_stats_receive(&stats_rx, stats_map_copy);
-            });
-        }
-        Err(err) => {
-            fatal!("Error locking exec_stat: {}", err);
-        }
-    }
-    let default_route = warp::path::end().map(|| warp::reply::html("FlashLiquidity Solver"));
-    let stats = warp::path("stats").map(move || {
-        let stats_map = Arc::clone(&stats_map);
-        let filter = HashSet::new();
-        get_stats_json(stats_map, filter)
-    });
-    let routes = default_route.or(stats);
 
+    // Axum setup
+
+    let app = Router::new()
+        .route("/", get(|| async { "Smart Transactions Solver" }))
+        .route("/stats", get(get_stats_json))
+        .with_state(stats_map);
+
+    let tcp_listener = TcpListener::bind(format!("0.0.0.0:{}", args.port)).await.unwrap();
     // Start all services
     println!("Starting server at port {}", args.port);
-    warp::serve(routes).run(([127, 0, 0, 1], args.port)).await;
+
+    {
+        let mut exec_set = exec_set.lock().await;
+        exec_set.spawn(async move {
+            listener.listen(block).await;
+        });
+        exec_set.spawn(async move {
+            run_stats_receive(&mut stats_rx, stats_map_copy).await;
+        });
+    };
+    serve(tcp_listener, app).await.unwrap();
 }

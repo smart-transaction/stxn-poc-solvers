@@ -2,11 +2,10 @@ use ethers::{abi::Address, providers::Middleware, types::U256};
 use fatal::fatal;
 use std::{
     collections::HashMap,
-    sync::{mpsc::Sender, Arc, Mutex},
-    thread::sleep,
+    sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use tokio::task::JoinSet;
+use tokio::{sync::{mpsc::Sender, Mutex}, task::JoinSet, time::sleep};
 use uuid::Uuid;
 
 use crate::{
@@ -98,7 +97,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                 &Duration::new(0, 0),
                 &now,
                 &event.data_values,
-            );
+            ).await;
             return;
         }
         let solver = solver.ok().unwrap();
@@ -129,7 +128,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                         &time_limit,
                                         &now,
                                         &event.data_values,
-                                    );
+                                    ).await;
                                     println!("Executor {} successfully finished", self.id);
                                     return;
                                 } else {
@@ -142,7 +141,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                         &time_limit,
                                         &now,
                                         &event.data_values,
-                                    );
+                                    ).await;
                                     last_transaction_status = TransactionStatus::TransactionPending;
                                 }
                             }
@@ -157,7 +156,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                     &time_limit,
                                     &now,
                                     &event.data_values,
-                                );
+                                ).await;
                                 last_transaction_status = TransactionStatus::TransactionFailed;
                             }
                         }
@@ -171,7 +170,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                             &time_limit,
                             &now,
                             &event.data_values,
-                        );
+                        ).await;
                         last_transaction_status = TransactionStatus::StepPending;
                     }
                 }
@@ -186,12 +185,12 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                         &time_limit,
                         &now,
                         &event.data_values,
-                    );
+                    ).await;
                     last_transaction_status = TransactionStatus::StepFailed;
                 }
             }
             // Wait for the next tick
-            sleep(self.tick_duration);
+            sleep(self.tick_duration).await;
         }
         // Sending post-exec stats
         self.send_stats(
@@ -203,12 +202,12 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
             &time_limit,
             &now,
             &event.data_values,
-        );
+        ).await;
         println!("Executor {} finished by timeout", self.id);
     }
 
     // Send statistics into the stats channel
-    fn send_stats(
+    async fn send_stats(
         &self,
         sequence_number: U256,
         app: String,
@@ -236,7 +235,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
             params: params.clone(),
             elapsed: now.elapsed(),
             remaining,
-        });
+        }).await;
         if let Some(err) = res.err() {
             println!("Error sending stats: {}", err);
         }
@@ -302,20 +301,14 @@ impl<M: Middleware + 'static> TimerExecutorFrame<M> {
             self.stats_tx.clone(),
         );
         let exec_id = executor.id.clone();
-        match self.exec_set.lock() {
-            Ok(mut exec_set) => {
-                exec_set.spawn(async move {
-                    executor.execute(event).await;
-                });
-                println!(
-                    "New executor {} is spawned, tasks running: {}",
-                    exec_id,
-                    exec_set.len(),
-                );
-            }
-            Err(err) => {
-                println!("Starting executor {} failed: {}", exec_id, err);
-            }
-        }
+        let mut exec_set = self.exec_set.lock().await;
+        exec_set.spawn(async move {
+            executor.execute(event).await;
+        });
+        println!(
+            "New executor {} is spawned, tasks running: {}",
+            exec_id,
+            exec_set.len(),
+        );
     }
 }

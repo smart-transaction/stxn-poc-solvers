@@ -1,13 +1,12 @@
-use fatal::fatal;
+use axum::{extract::State, response::Json};
 use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc::Receiver, Mutex};
 use std::{
-    collections::{HashMap, HashSet},
-    sync::mpsc::Receiver,
-    sync::{Arc, Mutex},
+    collections::HashMap,
+    sync::Arc,
     time::Duration,
 };
 use uuid::Uuid;
-use warp::reply::{json, Json};
 
 use crate::contracts_abi::laminator::AdditionalData;
 
@@ -44,44 +43,24 @@ pub struct TimerExecutorStats {
     pub remaining: Duration,
 }
 
-pub fn get_stats_json(
-    stats: Arc<Mutex<HashMap<Uuid, TimerExecutorStats>>>,
-    filter: HashSet<Status>,
-) -> Json {
-    match stats.lock() {
-        Ok(stats) => {
-            let mut filtered = stats
-                .clone()
-                .into_values()
-                .filter(|el| filter.is_empty() || filter.contains(&el.status))
-                .collect::<Vec<TimerExecutorStats>>();
-            filtered.sort_by(|el1, el2| el1.creation_time.cmp(&el2.creation_time));
-            json(&filtered)
-        }
-        Err(err) => {
-            println!("Error locking the stats map: {}", err);
-            json(&"".to_string())
-        }
-    }
+pub async fn get_stats_json(
+    stats: State<Arc<Mutex<HashMap<Uuid, TimerExecutorStats>>>>,
+) -> Json<Vec<TimerExecutorStats>> {
+    let stats = stats.lock().await;
+    let mut filtered = stats
+        .clone()
+        .into_values()
+        .collect::<Vec<TimerExecutorStats>>();
+    filtered.sort_by(|el1, el2| el1.creation_time.cmp(&el2.creation_time));
+    Json(filtered)
 }
 
-pub fn run_stats_receive(
-    rx: &Receiver<TimerExecutorStats>,
+pub async fn run_stats_receive(
+    rx: &mut Receiver<TimerExecutorStats>,
     stats_map: Arc<Mutex<HashMap<Uuid, TimerExecutorStats>>>,
 ) {
-    loop {
-        match rx.recv() {
-            Ok(stats) => match stats_map.lock() {
-                Ok(mut stats_map) => {
-                    stats_map.insert(stats.id, stats);
-                }
-                Err(err) => {
-                    fatal!("Error locking the mutex: {}", err);
-                }
-            },
-            Err(err) => {
-                println!("Error receiving stats from the channel: {}", err);
-            }
-        }
+    while let Some(stats) = rx.recv().await {
+        let mut stats_map = stats_map.lock().await;
+        stats_map.insert(stats.id, stats);
     }
 }
