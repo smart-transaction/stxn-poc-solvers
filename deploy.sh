@@ -100,7 +100,7 @@ services:
       - TICK_SECS=${TICK_SECS}
       - TICK_NANOS=${TICK_NANOS}
     ports:
-      - ${PORT}:${PORT}
+      - 9999:9999
 
 COMPOSE
 
