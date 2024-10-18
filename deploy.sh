@@ -110,7 +110,7 @@ COMPOSE
 set -e
 
 # Pull images:
-docker pull ${SOLVER_DOCKER_IMAGE}
+sudo docker pull ${SOLVER_DOCKER_IMAGE}
 
 # Start our docker images.
 ./up.sh
