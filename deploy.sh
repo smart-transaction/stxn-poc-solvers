@@ -8,7 +8,6 @@
 set -e
 
 # Vars init
-PORT=
 CHAIN_ID=
 WS_CHAIN_URL=
 LAMINATOR_ADDRESS=
@@ -26,7 +25,6 @@ do
   case ${OPT} in
     "dev")
         echo "Using dev environment"
-        PORT=9999
         CHAIN_ID=21363
         WS_CHAIN_URL=wss://service.lestnet.org:8888/
         LAMINATOR_ADDRESS=0xF8f81f532d1f2787BECd3ecD0734e9BEd1241313
@@ -92,7 +90,6 @@ services:
     container_name: stxn_solver
     image: ${SOLVER_DOCKER_IMAGE}
     environment:
-      - PORT=${PORT}
       - CHAIN_ID=${CHAIN_ID}
       - WS_CHAIN_URL=${WS_CHAIN_URL}
       - LAMINATOR_ADDRESS=${LAMINATOR_ADDRESS}
