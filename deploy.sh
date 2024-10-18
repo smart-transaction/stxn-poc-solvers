@@ -5,6 +5,8 @@
 # 2. setup.sh file from our setup folder locally in a local folder
 #    (pulled from Github or otherwise).
 
+set -e
+
 # Vars init
 PORT=
 CHAIN_ID=
