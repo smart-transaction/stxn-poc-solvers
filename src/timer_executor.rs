@@ -5,11 +5,16 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
-use tokio::{sync::{mpsc::Sender, Mutex}, task::JoinSet, time::sleep};
+use tokio::{
+    sync::{mpsc::Sender, Mutex},
+    task::JoinSet,
+    time::sleep,
+};
 use uuid::Uuid;
 
 use crate::{
     contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
+    solver::SolverParams,
     solvers::limit_order::LimitOrderSolver,
     stats::{Status, TimerExecutorStats, TransactionStatus},
 };
@@ -79,13 +84,13 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         // Initialize timer
         let now = Instant::now();
         // Create a solver of a given type
-        let solver = LimitOrderSolver::new(
-            &event,
-            self.call_breaker_address,
-            self.solver_address,
-            &self.custom_contracts_addresses,
-            self.middleware.clone(),
-        );
+        let solver = LimitOrderSolver::new(SolverParams {
+            event: event.clone(),
+            call_breaker_address: self.call_breaker_address,
+            solver_address: self.solver_address,
+            extra_contract_addresses: self.custom_contracts_addresses.clone(),
+            middleware: self.middleware.clone(),
+        });
         if let Err(err) = &solver {
             println!("Error on creating a solver: {}", err);
             self.send_stats(
@@ -97,7 +102,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                 &Duration::new(0, 0),
                 &now,
                 &event.data_values,
-            ).await;
+            )
+            .await;
             return;
         }
         let solver = solver.ok().unwrap();
@@ -128,7 +134,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                         &time_limit,
                                         &now,
                                         &event.data_values,
-                                    ).await;
+                                    )
+                                    .await;
                                     println!("Executor {} successfully finished", self.id);
                                     return;
                                 } else {
@@ -141,7 +148,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                         &time_limit,
                                         &now,
                                         &event.data_values,
-                                    ).await;
+                                    )
+                                    .await;
                                     last_transaction_status = TransactionStatus::TransactionPending;
                                 }
                             }
@@ -156,7 +164,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                                     &time_limit,
                                     &now,
                                     &event.data_values,
-                                ).await;
+                                )
+                                .await;
                                 last_transaction_status = TransactionStatus::TransactionFailed;
                             }
                         }
@@ -170,7 +179,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                             &time_limit,
                             &now,
                             &event.data_values,
-                        ).await;
+                        )
+                        .await;
                         last_transaction_status = TransactionStatus::StepPending;
                     }
                 }
@@ -185,7 +195,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
                         &time_limit,
                         &now,
                         &event.data_values,
-                    ).await;
+                    )
+                    .await;
                     last_transaction_status = TransactionStatus::StepFailed;
                 }
             }
@@ -202,7 +213,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
             &time_limit,
             &now,
             &event.data_values,
-        ).await;
+        )
+        .await;
         println!("Executor {} finished by timeout", self.id);
     }
 
@@ -224,18 +236,21 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         } else {
             remaining = Duration::new(0, 0);
         }
-        let res = self.stats_tx.send(TimerExecutorStats {
-            id: self.id,
-            sequence_number: sequence_number.as_u32(),
-            app,
-            creation_time: self.creation_time,
-            status,
-            transaction_status,
-            message,
-            params: params.clone(),
-            elapsed: now.elapsed(),
-            remaining,
-        }).await;
+        let res = self
+            .stats_tx
+            .send(TimerExecutorStats {
+                id: self.id,
+                sequence_number: sequence_number.as_u32(),
+                app,
+                creation_time: self.creation_time,
+                status,
+                transaction_status,
+                message,
+                params: params.clone(),
+                elapsed: now.elapsed(),
+                remaining,
+            })
+            .await;
         if let Some(err) = res.err() {
             println!("Error sending stats: {}", err);
         }

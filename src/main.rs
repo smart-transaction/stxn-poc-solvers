@@ -19,6 +19,7 @@ use crate::timer_executor::TimerExecutorFrame;
 
 mod contracts_abi;
 mod laminator_listener;
+mod solver;
 mod solvers;
 mod stats;
 mod timer_executor;

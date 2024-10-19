@@ -1,8 +1,10 @@
-use crate::contracts_abi::{
-    call_breaker::{CallBreaker, CallObject, ReturnObject},
-    ierc20::{ApproveCall, IERC20Calls},
-    laminated_proxy::{LaminatedProxyCalls, PullCall},
-    laminator::ProxyPushedFilter,
+use crate::{
+    contracts_abi::{
+        call_breaker::{CallBreaker, CallObject, ReturnObject},
+        ierc20::{ApproveCall, IERC20Calls},
+        laminated_proxy::{LaminatedProxyCalls, PullCall},
+    },
+    solver::SolverParams,
 };
 use ethers::{
     abi::AbiEncode,
@@ -19,10 +21,8 @@ use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
 use std::{
-    collections::HashMap,
     fmt::{self, Display},
     str::FromStr,
-    sync::Arc,
     time::Duration,
 };
 use tokio::sync::Mutex;
@@ -109,40 +109,40 @@ impl AbiEncode for FlashLoanData {
 }
 
 impl<M: Middleware> LimitOrderSolver<M> {
-    pub fn new(
-        event: &ProxyPushedFilter,
-        call_breaker_address: Address,
-        solver_address: Address,
-        extra_contract_addresses: &HashMap<String, Address>,
-        middleware: Arc<M>,
-    ) -> Result<LimitOrderSolver<M>, SolverError> {
-        println!("Event received: {}", event);
+    pub fn new(params: SolverParams<M>) -> Result<LimitOrderSolver<M>, SolverError> {
+        println!("Event received: {}", params.event);
         let flash_liquidity_selector = Self::selector();
-        if flash_liquidity_selector != event.selector.into() {
-            return Err(SolverError::UnknownSelector(event.selector.into()));
+        if flash_liquidity_selector != params.event.selector.into() {
+            return Err(SolverError::UnknownSelector(params.event.selector.into()));
         }
 
-        let flash_loan_address = extra_contract_addresses.get(FLASH_LOAN_NAME);
+        let flash_loan_address = params.extra_contract_addresses.get(FLASH_LOAN_NAME);
         if let None = flash_loan_address {
             return Err(SolverError::ParamError(
                 "missing address for contract FLASH_LOAN".to_string(),
             ));
         }
-        let swap_pool_address = extra_contract_addresses.get(SWAP_POOL_NAME);
+        let swap_pool_address = params.extra_contract_addresses.get(SWAP_POOL_NAME);
         if let None = swap_pool_address {
             return Err(SolverError::ParamError(
                 "missing adsdress for contract SWAP_POOL".to_string(),
             ));
         }
         let mut ret = LimitOrderSolver {
-            proxy_address: event.proxy_address,
-            call_breaker_address,
-            solver_address,
+            proxy_address: params.event.proxy_address,
+            call_breaker_address: params.call_breaker_address,
+            solver_address: params.solver_address,
             flash_loan_address: *flash_loan_address.unwrap(),
             swap_pool_address: *swap_pool_address.unwrap(),
-            call_breaker_contract: CallBreaker::new(call_breaker_address, middleware.clone()),
-            swap_pool_contract: SwapPool::new(*swap_pool_address.unwrap(), middleware.clone()),
-            sequence_number: event.sequence_number,
+            call_breaker_contract: CallBreaker::new(
+                params.call_breaker_address,
+                params.middleware.clone(),
+            ),
+            swap_pool_contract: SwapPool::new(
+                *swap_pool_address.unwrap(),
+                params.middleware.clone(),
+            ),
+            sequence_number: params.event.sequence_number,
             give_token: Result::Err(FromHexError::InvalidHexLength),
             take_token: Result::Err(FromHexError::InvalidHexLength),
             amount: Result::Err(FromDecStrErr::InvalidLength),
@@ -153,7 +153,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
             )),
         };
         // Extract parameters.
-        for ad in &event.data_values {
+        for ad in &params.event.data_values {
             match ad.name.as_str() {
                 "give_token" => ret.give_token = H160::from_str(ad.value.as_str()),
                 "take_token" => ret.take_token = H160::from_str(ad.value.as_str()),
