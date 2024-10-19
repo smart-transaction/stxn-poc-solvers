@@ -1,7 +1,7 @@
 use ethers::{
     abi::Address,
     providers::{Middleware, StreamExt},
-    types::U64,
+    types::BlockNumber,
 };
 use fatal::fatal;
 use std::sync::Arc;
@@ -30,16 +30,16 @@ impl<M: Middleware + 'static> LaminatorListener<M> {
         }
     }
 
-    pub async fn listen(&mut self, block: U64) {
+    pub async fn listen(&mut self) {
         let laminator_contract = Laminator::new(self.laminator_address, self.middleware.clone());
         let events = laminator_contract
             .event::<ProxyPushedFilter>()
-            .from_block(block);
+            .from_block(BlockNumber::Latest);
         loop {
             match events.stream().await {
                 Ok(stream) => {
                     let mut stream_take = stream.take(10);
-                    println!("Listening the event ProxyPushed from block {} ...", block);
+                    println!("Listening the event ProxyPushed ...");
                     while let Some(Ok(proxy_pushed)) = stream_take.next().await {
                         self.executor_frame.start_executor(proxy_pushed).await;
                     }

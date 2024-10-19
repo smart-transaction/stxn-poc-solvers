@@ -3,7 +3,7 @@ use clap::Parser;
 use ethers::{
     core::types::Address,
     middleware::MiddlewareBuilder,
-    providers::{Middleware, Provider, Ws},
+    providers::{Provider, Ws},
     signers::{LocalWallet, Signer},
 };
 use fatal::fatal;
@@ -104,17 +104,9 @@ async fn main() {
     );
 
     let mut listener = LaminatorListener::new(args.laminator_address, provider.clone(), exec_frame);
-
-    let block_res = provider.provider().get_block_number().await;
-    if block_res.is_err() {
-        fatal!("Error getting block: {}", block_res.err().unwrap());
-    }
-    let block = block_res.ok().unwrap();
-
     let stats_map_copy = Arc::clone(&stats_map);
 
     // Axum setup
-
     let app = Router::new()
         .route("/", get(|| async { "Smart Transactions Solver" }))
         .route("/stats/limit_order", get(get_stats_json))
@@ -127,7 +119,7 @@ async fn main() {
     {
         let mut exec_set = exec_set.lock().await;
         exec_set.spawn(async move {
-            listener.listen(block).await;
+            listener.listen().await;
         });
         exec_set.spawn(async move {
             run_stats_receive(&mut stats_rx, stats_map_copy).await;
