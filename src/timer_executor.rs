@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::{
     contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
-    solver::SolverParams,
+    solver::{Solver, SolverParams},
     solvers::limit_order::LimitOrderSolver,
     stats::{Status, TimerExecutorStats, TransactionStatus},
 };

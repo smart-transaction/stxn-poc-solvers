@@ -5,7 +5,7 @@ use crate::{
         laminated_proxy::{LaminatedProxyCalls, PullCall},
         ProxyPushedFilter,
     },
-    solver::SolverParams,
+    solver::{Solver, SolverError, SolverParams},
 };
 use ethers::{
     abi::AbiEncode,
@@ -21,11 +21,7 @@ use ethers_core::{
 use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-    time::Duration,
-};
+use std::{str::FromStr, time::Duration};
 use tokio::sync::Mutex;
 
 abigen!(
@@ -40,29 +36,7 @@ const APP_SELECTOR: &str = "FLASHLIQUIDITY.LIMITORDER";
 const FLASH_LOAN_NAME: &str = "FLASH_LOAN";
 const SWAP_POOL_NAME: &str = "SWAP_POOL";
 
-pub enum SolverError {
-    UnknownSelector(H256),
-    ParamError(String),
-    ExecError(String),
-}
-
 static TRANSACTION_MUTEX: Mutex<bool> = Mutex::const_new(true);
-
-impl Display for SolverError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SolverError::UnknownSelector(s) => {
-                write!(f, "UnknownSelector: {}", s)
-            }
-            SolverError::ParamError(s) => {
-                write!(f, "Parameter error, \"{}\"", s)
-            }
-            SolverError::ExecError(s) => {
-                write!(f, "Execution error, {}", s)
-            }
-        }
-    }
-}
 
 pub struct LimitOrderSolver<M> {
     // Solver address
@@ -213,14 +187,14 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
     }
 }
 
-impl<M: Middleware> LimitOrderSolver<M> {
-    pub fn app(&self) -> String {
+impl<M: Middleware> Solver for LimitOrderSolver<M> {
+    fn app(&self) -> String {
         return APP_SELECTOR.to_string();
     }
-    pub fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error> {
+    fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error> {
         self.time_limit.clone()
     }
-    pub async fn exec_solver_step(&self) -> Result<bool, SolverError> {
+    async fn exec_solver_step(&self) -> Result<bool, SolverError> {
         if let Err(err) = &self.amount {
             return Err(SolverError::ExecError(err.to_string()));
         }
@@ -246,7 +220,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
         Ok(true)
     }
 
-    pub async fn final_exec(&self) -> Result<bool, SolverError> {
+    async fn final_exec(&self) -> Result<bool, SolverError> {
         let hardcoded_weth_liquidity = 100;
         let hardcoded_dai_liquidity = 1000;
         let dai_liquidity_wei = parse_units(hardcoded_dai_liquidity, "ether").ok().unwrap();
