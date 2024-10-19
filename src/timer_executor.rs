@@ -84,13 +84,15 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         // Initialize timer
         let now = Instant::now();
         // Create a solver of a given type
-        let solver = LimitOrderSolver::new(SolverParams {
-            event: event.clone(),
-            call_breaker_address: self.call_breaker_address,
-            solver_address: self.solver_address,
-            extra_contract_addresses: self.custom_contracts_addresses.clone(),
-            middleware: self.middleware.clone(),
-        });
+        let solver = LimitOrderSolver::new(
+            event.clone(),
+            SolverParams {
+                call_breaker_address: self.call_breaker_address,
+                solver_address: self.solver_address,
+                extra_contract_addresses: self.custom_contracts_addresses.clone(),
+                middleware: self.middleware.clone(),
+            },
+        );
         if let Err(err) = &solver {
             println!("Error on creating a solver: {}", err);
             self.send_stats(

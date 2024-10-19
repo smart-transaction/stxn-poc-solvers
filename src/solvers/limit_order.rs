@@ -2,7 +2,7 @@ use crate::{
     contracts_abi::{
         call_breaker::{CallBreaker, CallObject, ReturnObject},
         ierc20::{ApproveCall, IERC20Calls},
-        laminated_proxy::{LaminatedProxyCalls, PullCall},
+        laminated_proxy::{LaminatedProxyCalls, PullCall}, ProxyPushedFilter,
     },
     solver::SolverParams,
 };
@@ -109,11 +109,11 @@ impl AbiEncode for FlashLoanData {
 }
 
 impl<M: Middleware> LimitOrderSolver<M> {
-    pub fn new(params: SolverParams<M>) -> Result<LimitOrderSolver<M>, SolverError> {
-        println!("Event received: {}", params.event);
+    pub fn new(event: ProxyPushedFilter, params: SolverParams<M>) -> Result<LimitOrderSolver<M>, SolverError> {
+        println!("Event received: {}", event);
         let flash_liquidity_selector = Self::selector();
-        if flash_liquidity_selector != params.event.selector.into() {
-            return Err(SolverError::UnknownSelector(params.event.selector.into()));
+        if flash_liquidity_selector != event.selector.into() {
+            return Err(SolverError::UnknownSelector(event.selector.into()));
         }
 
         let flash_loan_address = params.extra_contract_addresses.get(FLASH_LOAN_NAME);
@@ -129,7 +129,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
             ));
         }
         let mut ret = LimitOrderSolver {
-            proxy_address: params.event.proxy_address,
+            proxy_address: event.proxy_address,
             call_breaker_address: params.call_breaker_address,
             solver_address: params.solver_address,
             flash_loan_address: *flash_loan_address.unwrap(),
@@ -142,7 +142,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
                 *swap_pool_address.unwrap(),
                 params.middleware.clone(),
             ),
-            sequence_number: params.event.sequence_number,
+            sequence_number: event.sequence_number,
             give_token: Result::Err(FromHexError::InvalidHexLength),
             take_token: Result::Err(FromHexError::InvalidHexLength),
             amount: Result::Err(FromDecStrErr::InvalidLength),
@@ -153,7 +153,7 @@ impl<M: Middleware> LimitOrderSolver<M> {
             )),
         };
         // Extract parameters.
-        for ad in &params.event.data_values {
+        for ad in &event.data_values {
             match ad.name.as_str() {
                 "give_token" => ret.give_token = H160::from_str(ad.value.as_str()),
                 "take_token" => ret.take_token = H160::from_str(ad.value.as_str()),
