@@ -1,4 +1,5 @@
 use ethers::types::{Address, H256};
+use tokio::sync::Mutex;
 use std::{
     collections::HashMap,
     fmt::{self, Display},
@@ -15,6 +16,7 @@ where
     pub solver_address: Address,
     pub extra_contract_addresses: HashMap<String, Address>,
     pub middleware: Arc<M>,
+    pub guard: Arc<Mutex<bool>>,
 }
 
 pub enum SolverError {

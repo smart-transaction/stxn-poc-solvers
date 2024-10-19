@@ -102,6 +102,7 @@ async fn main() {
             solver_address: wallet_address,
             middleware: provider.clone(),
             extra_contract_addresses: custom_contracts_addresses.clone(),
+            guard: Arc::new(Mutex::new(true)),
         },
         exec_set.clone(),
         args.tick_secs,

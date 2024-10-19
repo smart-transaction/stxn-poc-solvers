@@ -21,7 +21,7 @@ use ethers_core::{
 use fixed_hash::rustc_hex::FromHexError;
 use keccak_hash::keccak;
 use parse_duration;
-use std::{str::FromStr, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 abigen!(
@@ -32,11 +32,9 @@ abigen!(
     "./abi_town/MockDaiWethPool.sol/MockDaiWethPool.json";
 );
 
-const APP_SELECTOR: &str = "FLASHLIQUIDITY.LIMITORDER";
-const FLASH_LOAN_NAME: &str = "FLASH_LOAN";
-const SWAP_POOL_NAME: &str = "SWAP_POOL";
-
-static TRANSACTION_MUTEX: Mutex<bool> = Mutex::const_new(true);
+pub const APP_SELECTOR: &str = "FLASHLIQUIDITY.LIMITORDER";
+pub const FLASH_LOAN_NAME: &str = "FLASH_LOAN";
+pub const SWAP_POOL_NAME: &str = "SWAP_POOL";
 
 pub struct LimitOrderSolver<M> {
     // Solver address
@@ -62,6 +60,9 @@ pub struct LimitOrderSolver<M> {
     buy_price: Result<U256, FromDecStrErr>,
     slippage: Result<U256, FromDecStrErr>,
     time_limit: Result<Duration, parse_duration::parse::Error>,
+
+    // Transaction guard
+    guard: Arc<Mutex<bool>>,
 }
 
 // A clone of the FlashLoanData onchain structure.
@@ -129,6 +130,7 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
             time_limit: Result::Err(parse_duration::parse::Error::NoValueFound(
                 "Uninitialized value".to_string(),
             )),
+            guard: params.guard.clone(),
         };
         // Extract parameters.
         for ad in &event.data_values {
@@ -374,7 +376,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
         let call_bytes: Bytes = call_objects.encode().into();
         let return_bytes: Bytes = return_objects.encode().into();
         {
-            let _guard = TRANSACTION_MUTEX.lock().await;
+            let _guard = self.guard.lock().await;
             match self
                 .call_breaker_contract
                 .execute_and_verify_with_flashloan(
