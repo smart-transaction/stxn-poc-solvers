@@ -1,7 +1,6 @@
-use ethers::{abi::Address, providers::Middleware, types::U256};
+use ethers::{providers::Middleware, types::U256};
 use fatal::fatal;
 use std::{
-    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
@@ -22,21 +21,12 @@ use crate::{
 // The executor combined with a timer, PoC version.
 // For real prod version the timer is to be moved into its own thread to reduce a number of
 // contract read calls.
-struct TimerRequestExecutor<M> {
+struct TimerRequestExecutor<M: Clone> {
     // Unique ID, used for monitoring
     id: Uuid,
 
-    // Middleware instance
-    middleware: Arc<M>,
-
-    // Call Breaker Address
-    call_breaker_address: Address,
-
-    // The address of the walled that is used by the ws_client.
-    solver_address: Address,
-
-    // Custom contract addresses
-    custom_contracts_addresses: HashMap<String, Address>,
+    // Params that are used in solver.
+    params: SolverParams<M>,
 
     // Creation time since Unix epoch, used for ordering executors in stats
     creation_time: Duration,
@@ -48,12 +38,9 @@ struct TimerRequestExecutor<M> {
     stats_tx: Sender<TimerExecutorStats>,
 }
 
-impl<M: Middleware + 'static> TimerRequestExecutor<M> {
+impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
     pub fn new(
-        call_breaker_address: Address,
-        solver_address: Address,
-        middleware: Arc<M>,
-        custom_contracts_addresses: HashMap<String, Address>,
+        params: SolverParams<M>,
         tick_duration: Duration,
         stats_tx: Sender<TimerExecutorStats>,
     ) -> TimerRequestExecutor<M> {
@@ -66,10 +53,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         }
         let ret = TimerRequestExecutor {
             id: Uuid::new_v4(),
-            middleware,
-            call_breaker_address,
-            solver_address,
-            custom_contracts_addresses,
+            params,
             creation_time: creation_time_res.ok().unwrap(),
             tick_duration,
             stats_tx,
@@ -84,15 +68,7 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
         // Initialize timer
         let now = Instant::now();
         // Create a solver of a given type
-        let solver = LimitOrderSolver::new(
-            event.clone(),
-            SolverParams {
-                call_breaker_address: self.call_breaker_address,
-                solver_address: self.solver_address,
-                extra_contract_addresses: self.custom_contracts_addresses.clone(),
-                middleware: self.middleware.clone(),
-            },
-        );
+        let solver = LimitOrderSolver::new(event.clone(), self.params.clone());
         if let Err(err) = &solver {
             println!("Error on creating a solver: {}", err);
             self.send_stats(
@@ -260,18 +236,8 @@ impl<M: Middleware + 'static> TimerRequestExecutor<M> {
 }
 
 // The executor frame. It's a container for running executors
-pub struct TimerExecutorFrame<M> {
-    // Call breaker contract address
-    call_breaker_address: Address,
-
-    // The address provided by the wallet used in ws_client
-    solver_address: Address,
-
-    // Middleware instance
-    middleware: Arc<M>,
-
-    // Custom contract addresses
-    custom_contracts_addresses: HashMap<String, Address>,
+pub struct TimerExecutorFrame<M: Clone> {
+    solver_params: SolverParams<M>,
 
     // Join set for parallel executing
     exec_set: Arc<Mutex<JoinSet<()>>>,
@@ -283,22 +249,16 @@ pub struct TimerExecutorFrame<M> {
     stats_tx: Sender<TimerExecutorStats>,
 }
 
-impl<M: Middleware + 'static> TimerExecutorFrame<M> {
+impl<M: Middleware + Clone + 'static> TimerExecutorFrame<M> {
     pub fn new(
-        call_breaker_address: Address,
-        solver_address: Address,
-        middleware: Arc<M>,
-        custom_contracts_addresses: HashMap<String, Address>,
+        solver_params: SolverParams<M>,
         exec_set: Arc<Mutex<JoinSet<()>>>,
         tick_secs: u64,
         tick_nanos: u32,
         stats_tx: Sender<TimerExecutorStats>,
     ) -> TimerExecutorFrame<M> {
         let ret = TimerExecutorFrame {
-            call_breaker_address,
-            solver_address,
-            middleware,
-            custom_contracts_addresses,
+            solver_params,
             exec_set,
             tick_duration: Duration::new(tick_secs, tick_nanos),
             stats_tx,
@@ -309,14 +269,8 @@ impl<M: Middleware + 'static> TimerExecutorFrame<M> {
 
     pub async fn start_executor(&self, event: ProxyPushedFilter) {
         let dur = self.tick_duration.clone();
-        let executor = TimerRequestExecutor::new(
-            self.call_breaker_address,
-            self.solver_address,
-            self.middleware.clone(),
-            self.custom_contracts_addresses.clone(),
-            dur,
-            self.stats_tx.clone(),
-        );
+        let executor =
+            TimerRequestExecutor::new(self.solver_params.clone(), dur, self.stats_tx.clone());
         let exec_id = executor.id.clone();
         let mut exec_set = self.exec_set.lock().await;
         exec_set.spawn(async move {

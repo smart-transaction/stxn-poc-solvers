@@ -11,13 +11,13 @@ use crate::{
     timer_executor::TimerExecutorFrame,
 };
 
-pub struct LaminatorListener<M> {
+pub struct LaminatorListener<M: Clone> {
     laminator_address: Address,
     middleware: Arc<M>,
     executor_frame: TimerExecutorFrame<M>,
 }
 
-impl<M: Middleware + 'static> LaminatorListener<M> {
+impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
     pub fn new(
         laminator_address: Address,
         middleware: Arc<M>,

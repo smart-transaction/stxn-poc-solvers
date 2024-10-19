@@ -1,4 +1,7 @@
-use axum::{routing::{get, Router}, serve};
+use axum::{
+    routing::{get, Router},
+    serve,
+};
 use clap::Parser;
 use ethers::{
     core::types::Address,
@@ -7,11 +10,16 @@ use ethers::{
     signers::{LocalWallet, Signer},
 };
 use fatal::fatal;
-use std::{
-    collections::HashMap,
-    sync::Arc,
+use solver::SolverParams;
+use std::{collections::HashMap, sync::Arc};
+use tokio::{
+    net::TcpListener,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Mutex,
+    },
+    task::JoinSet,
 };
-use tokio::{net::TcpListener, sync::{mpsc::{self, Receiver, Sender}, Mutex}, task::JoinSet};
 
 use crate::laminator_listener::LaminatorListener;
 use crate::stats::{get_stats_json, run_stats_receive, TimerExecutorStats};
@@ -81,12 +89,7 @@ async fn main() {
     println!("Connected successfully!");
 
     let wallet_address = wallet.address();
-    let provider = Arc::new(
-        provider_res
-            .ok()
-            .unwrap()
-            .with_signer(wallet)
-    );
+    let provider = Arc::new(provider_res.ok().unwrap().with_signer(wallet));
 
     // Addresses of specific solvers contracts.
     let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();
@@ -94,10 +97,12 @@ async fn main() {
     custom_contracts_addresses.insert("SWAP_POOL".to_string(), args.swap_pool_address);
 
     let exec_frame = TimerExecutorFrame::new(
-        args.call_breaker_address,
-        wallet_address,
-        provider.clone(),
-        custom_contracts_addresses,
+        SolverParams {
+            call_breaker_address: args.call_breaker_address,
+            solver_address: wallet_address,
+            middleware: provider.clone(),
+            extra_contract_addresses: custom_contracts_addresses.clone(),
+        },
         exec_set.clone(),
         args.tick_secs,
         args.tick_nanos,
@@ -113,7 +118,9 @@ async fn main() {
         .route("/stats/limit_order", get(get_stats_json))
         .with_state(stats_map);
 
-    let tcp_listener = TcpListener::bind(format!("0.0.0.0:{}", args.port)).await.unwrap();
+    let tcp_listener = TcpListener::bind(format!("0.0.0.0:{}", args.port))
+        .await
+        .unwrap();
     // Start all services
     println!("Starting server at port {}", args.port);
 

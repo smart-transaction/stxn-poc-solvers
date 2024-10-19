@@ -2,7 +2,8 @@ use crate::{
     contracts_abi::{
         call_breaker::{CallBreaker, CallObject, ReturnObject},
         ierc20::{ApproveCall, IERC20Calls},
-        laminated_proxy::{LaminatedProxyCalls, PullCall}, ProxyPushedFilter,
+        laminated_proxy::{LaminatedProxyCalls, PullCall},
+        ProxyPushedFilter,
     },
     solver::SolverParams,
 };
@@ -108,8 +109,11 @@ impl AbiEncode for FlashLoanData {
     }
 }
 
-impl<M: Middleware> LimitOrderSolver<M> {
-    pub fn new(event: ProxyPushedFilter, params: SolverParams<M>) -> Result<LimitOrderSolver<M>, SolverError> {
+impl<M: Middleware + Clone> LimitOrderSolver<M> {
+    pub fn new(
+        event: ProxyPushedFilter,
+        params: SolverParams<M>,
+    ) -> Result<LimitOrderSolver<M>, SolverError> {
         println!("Event received: {}", event);
         let flash_liquidity_selector = Self::selector();
         if flash_liquidity_selector != event.selector.into() {
