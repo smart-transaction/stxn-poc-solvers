@@ -1,32 +1,24 @@
-use ethers::{providers::Middleware, types::U256};
+use ethers::types::U256;
 use fatal::fatal;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant, SystemTime},
-};
-use tokio::{
-    sync::{mpsc::Sender, Mutex},
-    task::JoinSet,
-    time::sleep,
-};
+use std::time::{Duration, Instant, SystemTime};
+use tokio::{sync::mpsc::Sender, time::sleep};
 use uuid::Uuid;
 
 use crate::{
     contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
-    solver::{Solver, SolverParams},
-    solvers::limit_order::LimitOrderSolver,
+    solver::Solver,
     stats::{Status, TimerExecutorStats, TransactionStatus},
 };
 
 // The executor combined with a timer, PoC version.
 // For real prod version the timer is to be moved into its own thread to reduce a number of
 // contract read calls.
-struct TimerRequestExecutor<M: Clone> {
+pub struct TimerRequestExecutor<S> {
+    // The solver
+    solver: S,
+
     // Unique ID, used for monitoring
     id: Uuid,
-
-    // Params that are used in solver.
-    params: SolverParams<M>,
 
     // Creation time since Unix epoch, used for ordering executors in stats
     creation_time: Duration,
@@ -38,12 +30,12 @@ struct TimerRequestExecutor<M: Clone> {
     stats_tx: Sender<TimerExecutorStats>,
 }
 
-impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
+impl<S: Solver> TimerRequestExecutor<S> {
     pub fn new(
-        params: SolverParams<M>,
+        solver: S,
         tick_duration: Duration,
         stats_tx: Sender<TimerExecutorStats>,
-    ) -> TimerRequestExecutor<M> {
+    ) -> TimerRequestExecutor<S> {
         let creation_time_res = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
         if creation_time_res.is_err() {
             fatal!(
@@ -52,8 +44,8 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
             );
         }
         let ret = TimerRequestExecutor {
+            solver,
             id: Uuid::new_v4(),
-            params,
             creation_time: creation_time_res.ok().unwrap(),
             tick_duration,
             stats_tx,
@@ -68,44 +60,27 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
         // Initialize timer
         let now = Instant::now();
         // Create a solver of a given type
-        let solver = LimitOrderSolver::new(event.clone(), self.params.clone());
-        if let Err(err) = &solver {
-            println!("Error on creating a solver: {}", err);
-            self.send_stats(
-                event.sequence_number,
-                String::new(),
-                Status::Failed,
-                TransactionStatus::NotExecuted,
-                err.to_string(),
-                &Duration::new(0, 0),
-                &now,
-                &event.data_values,
-            )
-            .await;
-            return;
-        }
-        let solver = solver.ok().unwrap();
-        if solver.time_limit().is_err() {
+        if self.solver.time_limit().is_err() {
             print!(
                 "Error getting time limit: {}",
-                &solver.time_limit().err().unwrap()
+                &self.solver.time_limit().err().unwrap()
             );
             return;
         }
         // Tokens reading.
-        let time_limit = solver.time_limit().ok().unwrap();
+        let time_limit = self.solver.time_limit().ok().unwrap();
         let mut last_transaction_status = TransactionStatus::NotExecuted;
         while now.elapsed() < time_limit {
             // Actions
-            match solver.exec_solver_step().await {
+            match self.solver.exec_solver_step().await {
                 Ok(succeeded) => {
                     if succeeded {
-                        match solver.final_exec().await {
+                        match self.solver.final_exec().await {
                             Ok(succeeded) => {
                                 if succeeded {
                                     self.send_stats(
                                         event.sequence_number,
-                                        solver.app(),
+                                        self.solver.app(),
                                         Status::Succeeded,
                                         TransactionStatus::Succeeded,
                                         String::new(),
@@ -119,7 +94,7 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
                                 } else {
                                     self.send_stats(
                                         event.sequence_number,
-                                        solver.app(),
+                                        self.solver.app(),
                                         Status::Running,
                                         TransactionStatus::TransactionPending,
                                         String::new(),
@@ -135,7 +110,7 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
                                 println!("Error in solver final exec: {}", err);
                                 self.send_stats(
                                     event.sequence_number,
-                                    solver.app(),
+                                    self.solver.app(),
                                     Status::Running,
                                     TransactionStatus::TransactionFailed,
                                     err.to_string(),
@@ -150,7 +125,7 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
                     } else {
                         self.send_stats(
                             event.sequence_number,
-                            solver.app(),
+                            self.solver.app(),
                             Status::Running,
                             TransactionStatus::StepPending,
                             String::new(),
@@ -166,7 +141,7 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
                     println!("Error in solver step call: {}", err);
                     self.send_stats(
                         event.sequence_number,
-                        solver.app(),
+                        self.solver.app(),
                         Status::Failed,
                         TransactionStatus::StepFailed,
                         err.to_string(),
@@ -184,7 +159,7 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
         // Sending post-exec stats
         self.send_stats(
             event.sequence_number,
-            solver.app(),
+            self.solver.app(),
             Status::Timeout,
             last_transaction_status,
             String::new(),
@@ -232,54 +207,5 @@ impl<M: Middleware + Clone + 'static> TimerRequestExecutor<M> {
         if let Some(err) = res.err() {
             println!("Error sending stats: {}", err);
         }
-    }
-}
-
-// The executor frame. It's a container for running executors
-pub struct TimerExecutorFrame<M: Clone> {
-    solver_params: SolverParams<M>,
-
-    // Join set for parallel executing
-    exec_set: Arc<Mutex<JoinSet<()>>>,
-
-    // Duration of time ticks
-    tick_duration: Duration,
-
-    // Stats channels
-    stats_tx: Sender<TimerExecutorStats>,
-}
-
-impl<M: Middleware + Clone + 'static> TimerExecutorFrame<M> {
-    pub fn new(
-        solver_params: SolverParams<M>,
-        exec_set: Arc<Mutex<JoinSet<()>>>,
-        tick_secs: u64,
-        tick_nanos: u32,
-        stats_tx: Sender<TimerExecutorStats>,
-    ) -> TimerExecutorFrame<M> {
-        let ret = TimerExecutorFrame {
-            solver_params,
-            exec_set,
-            tick_duration: Duration::new(tick_secs, tick_nanos),
-            stats_tx,
-        };
-
-        ret
-    }
-
-    pub async fn start_executor(&self, event: ProxyPushedFilter) {
-        let dur = self.tick_duration.clone();
-        let executor =
-            TimerRequestExecutor::new(self.solver_params.clone(), dur, self.stats_tx.clone());
-        let exec_id = executor.id.clone();
-        let mut exec_set = self.exec_set.lock().await;
-        exec_set.spawn(async move {
-            executor.execute(event).await;
-        });
-        println!(
-            "New executor {} is spawned, tasks running: {}",
-            exec_id,
-            exec_set.len(),
-        );
     }
 }

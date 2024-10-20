@@ -5,7 +5,7 @@ use crate::{
         laminated_proxy::{LaminatedProxyCalls, PullCall},
         ProxyPushedFilter,
     },
-    solver::{Solver, SolverError, SolverParams},
+    solver::{self, Solver, SolverError, SolverParams},
 };
 use ethers::{
     abi::AbiEncode,
@@ -90,7 +90,7 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
         params: SolverParams<M>,
     ) -> Result<LimitOrderSolver<M>, SolverError> {
         println!("Event received: {}", event);
-        let flash_liquidity_selector = Self::selector();
+        let flash_liquidity_selector = solver::selector(APP_SELECTOR.to_string());
         if flash_liquidity_selector != event.selector.into() {
             return Err(SolverError::UnknownSelector(event.selector.into()));
         }
@@ -183,19 +183,17 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
         }
         Ok(ret)
     }
-
-    pub fn selector() -> H256 {
-        keccak(APP_SELECTOR.encode()).as_fixed_bytes().into()
-    }
 }
 
 impl<M: Middleware> Solver for LimitOrderSolver<M> {
     fn app(&self) -> String {
         return APP_SELECTOR.to_string();
     }
+
     fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error> {
         self.time_limit.clone()
     }
+
     async fn exec_solver_step(&self) -> Result<bool, SolverError> {
         if let Err(err) = &self.amount {
             return Err(SolverError::ExecError(err.to_string()));

@@ -1,11 +1,15 @@
-use ethers::types::{Address, H256};
-use tokio::sync::Mutex;
+use ethers::{
+    abi::AbiEncode,
+    types::{Address, H256},
+};
+use keccak_hash::keccak;
 use std::{
     collections::HashMap,
     fmt::{self, Display},
     sync::Arc,
     time::Duration,
 };
+use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct SolverParams<M>
@@ -46,4 +50,8 @@ pub trait Solver {
     fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error>;
     async fn exec_solver_step(&self) -> Result<bool, SolverError>;
     async fn final_exec(&self) -> Result<bool, SolverError>;
+}
+
+pub fn selector(app: String) -> H256 {
+    keccak(app.as_str().encode()).as_fixed_bytes().into()
 }

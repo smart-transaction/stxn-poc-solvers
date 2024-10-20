@@ -10,8 +10,9 @@ use ethers::{
     signers::{LocalWallet, Signer},
 };
 use fatal::fatal;
-use solver::SolverParams;
-use std::{collections::HashMap, sync::Arc};
+use solver::{selector, SolverParams};
+use solvers::limit_order;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     net::TcpListener,
     sync::{
@@ -23,7 +24,6 @@ use tokio::{
 
 use crate::laminator_listener::LaminatorListener;
 use crate::stats::{get_stats_json, run_stats_receive, TimerExecutorStats};
-use crate::timer_executor::TimerExecutorFrame;
 
 mod contracts_abi;
 mod laminator_listener;
@@ -96,7 +96,9 @@ async fn main() {
     custom_contracts_addresses.insert("FLASH_LOAN".to_string(), args.flash_loan_address);
     custom_contracts_addresses.insert("SWAP_POOL".to_string(), args.swap_pool_address);
 
-    let exec_frame = TimerExecutorFrame::new(
+    let mut solver_params = HashMap::new();
+    solver_params.insert(
+        selector(limit_order::APP_SELECTOR.to_string()),
         SolverParams {
             call_breaker_address: args.call_breaker_address,
             solver_address: wallet_address,
@@ -104,13 +106,16 @@ async fn main() {
             extra_contract_addresses: custom_contracts_addresses.clone(),
             guard: Arc::new(Mutex::new(true)),
         },
-        exec_set.clone(),
-        args.tick_secs,
-        args.tick_nanos,
-        stats_tx.clone(),
     );
 
-    let mut listener = LaminatorListener::new(args.laminator_address, provider.clone(), exec_frame);
+    let mut listener = LaminatorListener::new(
+        args.laminator_address,
+        provider.clone(),
+        solver_params,
+        exec_set.clone(),
+        Duration::new(args.tick_secs, args.tick_nanos),
+        stats_tx.clone(),
+    );
     let stats_map_copy = Arc::clone(&stats_map);
 
     // Axum setup
