@@ -38,8 +38,6 @@ pub struct LaminatorListener<M: Clone> {
     stats_tx: Sender<TimerExecutorStats>,
 }
 
-//= Arc::new(Mutex::new(JoinSet::new()));
-
 impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
     pub fn new(
         laminator_address: Address,
