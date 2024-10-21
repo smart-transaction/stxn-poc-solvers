@@ -54,7 +54,7 @@ cat >up.sh << UP
 
 # Secrets
 cat >.env << ENV
-WALLET_PRIVATE_KEY=\$(gcloud secrets versions access 1 --secret="WALLET_PRIVATE_KEY_${SECRET_SUFFIX}")
+LIMIT_ORDER_WALLET_PRIVATE_KEY=\$(gcloud secrets versions access 1 --secret="WALLET_PRIVATE_KEY_${SECRET_SUFFIX}")
 
 ENV
 
@@ -96,7 +96,7 @@ services:
       - CALL_BREAKER_ADDRESS=${CALL_BREAKER_ADDRESS}
       - FLASH_LOAN_ADDRESS=${FLASH_LOAN_ADDRESS}
       - SWAP_POOL_ADDRESS=${SWAP_POOL_ADDRESS}
-      - WALLET_PRIVATE_KEY=\${WALLET_PRIVATE_KEY}
+      - LIMIT_ORDER_WALLET_PRIVATE_KEY=\${LIMIT_ORDER_WALLET_PRIVATE_KEY}
       - TICK_SECS=${TICK_SECS}
       - TICK_NANOS=${TICK_NANOS}
     ports:

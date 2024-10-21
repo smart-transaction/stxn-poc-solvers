@@ -56,7 +56,7 @@ pub struct Args {
     pub swap_pool_address: Address,
 
     #[arg(long)]
-    pub wallet_private_key: LocalWallet,
+    pub limit_order_wallet_private_key: LocalWallet,
 
     #[arg(long, default_value_t = 1)]
     pub tick_secs: u64,
@@ -69,7 +69,7 @@ pub struct Args {
 async fn main() {
     // Get args
     let args = Args::parse();
-    let wallet = args.wallet_private_key.with_chain_id(args.chain_id);
+    let limit_order_wallet = args.limit_order_wallet_private_key.with_chain_id(args.chain_id);
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
     let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
         mpsc::channel(100);
@@ -79,17 +79,17 @@ async fn main() {
         "Connecting to the chain with URL {} ...",
         args.ws_chain_url.as_str()
     );
-    let provider_res = Provider::<Ws>::connect(args.ws_chain_url.as_str()).await;
-    if provider_res.is_err() {
+    let limit_order_provider = Provider::<Ws>::connect(args.ws_chain_url.as_str()).await;
+    if limit_order_provider.is_err() {
         fatal!(
             "Failed connection to the chain: {}",
-            provider_res.err().unwrap()
+            limit_order_provider.err().unwrap()
         );
     }
     println!("Connected successfully!");
 
-    let wallet_address = wallet.address();
-    let provider = Arc::new(provider_res.ok().unwrap().with_signer(wallet));
+    let limit_order_wallet_address = limit_order_wallet.address();
+    let limit_order_provider = Arc::new(limit_order_provider.ok().unwrap().with_signer(limit_order_wallet));
 
     // Addresses of specific solvers contracts.
     let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();
@@ -101,8 +101,8 @@ async fn main() {
         selector(limit_order::APP_SELECTOR.to_string()),
         SolverParams {
             call_breaker_address: args.call_breaker_address,
-            solver_address: wallet_address,
-            middleware: provider.clone(),
+            solver_address: limit_order_wallet_address,
+            middleware: limit_order_provider.clone(),
             extra_contract_addresses: custom_contracts_addresses.clone(),
             guard: Arc::new(Mutex::new(true)),
         },
@@ -110,7 +110,7 @@ async fn main() {
 
     let mut listener = LaminatorListener::new(
         args.laminator_address,
-        provider.clone(),
+        limit_order_provider.clone(),
         solver_params,
         exec_set.clone(),
         Duration::new(args.tick_secs, args.tick_nanos),
