@@ -194,6 +194,8 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
         self.time_limit.clone()
     }
 
+    async fn init_exec(&self) {}
+
     async fn exec_solver_step(&self) -> Result<bool, SolverError> {
         if let Err(err) = &self.amount {
             return Err(SolverError::ExecError(err.to_string()));

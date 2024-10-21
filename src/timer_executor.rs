@@ -57,6 +57,8 @@ impl<S: Solver> TimerRequestExecutor<S> {
     // Execute the FlashLiquidity executor with given params.
     pub async fn execute(&self, event: ProxyPushedFilter) {
         println!("Executor {} started", self.id);
+        // Initial execution
+        self.solver.init_exec().await;
         // Initialize timer
         let now = Instant::now();
         // Create a solver of a given type
