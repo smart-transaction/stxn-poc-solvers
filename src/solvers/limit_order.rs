@@ -5,7 +5,7 @@ use crate::{
         laminated_proxy::{LaminatedProxyCalls, PullCall},
         ProxyPushedFilter,
     },
-    solver::{self, Solver, SolverError, SolverParams},
+    solver::{self, Solver, SolverError, SolverParams, SolverResponse},
 };
 use ethers::{
     abi::AbiEncode,
@@ -192,7 +192,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
         self.time_limit.clone()
     }
 
-    async fn exec_solver_step(&self) -> Result<bool, SolverError> {
+    async fn exec_solver_step(&self) -> Result<SolverResponse, SolverError> {
         if let Err(err) = &self.amount {
             return Err(SolverError::ExecError(err.to_string()));
         }
@@ -204,21 +204,26 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             Ok(current_price) => {
                 let desired_price = *self.buy_price.as_ref().ok().unwrap();
                 if current_price > desired_price {
-                    println!(
-                        "The current price {} is higher than the desired {}",
-                        current_price, desired_price
-                    );
-                    return Ok(false);
+                    return Ok(SolverResponse {
+                        succeeded: false,
+                        message: format!(
+                            "The current price {} is higher than the desired {}",
+                            current_price, desired_price
+                        ),
+                    });
                 }
             }
             Err(err) => {
                 return Err(SolverError::ExecError(err.to_string()));
             }
         }
-        Ok(true)
+        Ok(SolverResponse {
+            succeeded: true,
+            message: "Price conditions are met".to_string(),
+        })
     }
 
-    async fn final_exec(&self) -> Result<bool, SolverError> {
+    async fn final_exec(&self) -> Result<SolverResponse, SolverError> {
         let hardcoded_weth_liquidity = 100;
         let hardcoded_dai_liquidity = 1000;
         let dai_liquidity_wei = parse_units(hardcoded_dai_liquidity, "ether").ok().unwrap();
@@ -357,11 +362,16 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
                         Ok(receipt) => {
                             if let Some(receipt) = receipt {
                                 if let Some(status) = receipt.status {
-                                    println!("Transaction status: {}", status);
-                                    return Ok(status != 0.into());
+                                    return Ok(SolverResponse {
+                                        succeeded: status != 0.into(),
+                                        message: format!("Transaction status: {}", status),
+                                    });
                                 }
                             }
-                            return Ok(false);
+                            return Ok(SolverResponse {
+                                succeeded: false,
+                                message: "transaction status wasn't received".to_string(),
+                            });
                         }
                         Err(err) => {
                             return Err(SolverError::ExecError(format!(

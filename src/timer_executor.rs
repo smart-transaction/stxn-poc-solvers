@@ -70,20 +70,34 @@ impl<S: Solver> TimerRequestExecutor<S> {
         // Tokens reading.
         let time_limit = self.solver.time_limit().ok().unwrap();
         let mut last_transaction_status = TransactionStatus::NotExecuted;
+        let mut last_message = String::new();
         while now.elapsed() < time_limit {
             // Actions
             match self.solver.exec_solver_step().await {
-                Ok(succeeded) => {
-                    if succeeded {
+                Ok(response) => {
+                    last_message = response.message.clone();
+                    if response.succeeded {
+                        self.send_stats(
+                            event.sequence_number,
+                            self.solver.app(),
+                            Status::Running,
+                            TransactionStatus::TransactionPending,
+                            response.message.clone(),
+                            &time_limit,
+                            &now,
+                            &event.data_values,
+                        )
+                        .await;
                         match self.solver.final_exec().await {
-                            Ok(succeeded) => {
-                                if succeeded {
+                            Ok(response) => {
+                                last_message = response.message.clone();
+                                if response.succeeded {
                                     self.send_stats(
                                         event.sequence_number,
                                         self.solver.app(),
                                         Status::Succeeded,
                                         TransactionStatus::Succeeded,
-                                        String::new(),
+                                        response.message.clone(),
                                         &time_limit,
                                         &now,
                                         &event.data_values,
@@ -97,7 +111,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                         self.solver.app(),
                                         Status::Running,
                                         TransactionStatus::TransactionPending,
-                                        String::new(),
+                                        response.message.clone(),
                                         &time_limit,
                                         &now,
                                         &event.data_values,
@@ -128,7 +142,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                             self.solver.app(),
                             Status::Running,
                             TransactionStatus::StepPending,
-                            String::new(),
+                            response.message.clone(),
                             &time_limit,
                             &now,
                             &event.data_values,
@@ -162,7 +176,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
             self.solver.app(),
             Status::Timeout,
             last_transaction_status,
-            String::new(),
+            last_message,
             &time_limit,
             &now,
             &event.data_values,

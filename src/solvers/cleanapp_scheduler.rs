@@ -1,6 +1,6 @@
 use crate::{
     contracts_abi::{CallBreaker, ProxyPushedFilter},
-    solver::{self, Solver, SolverError, SolverParams},
+    solver::{self, Solver, SolverError, SolverParams, SolverResponse},
 };
 use chrono::{TimeZone, Utc};
 use cron::{
@@ -114,17 +114,17 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
         Ok(Duration::new(60 * 60 * 24, 0))
     }
 
-    async fn exec_solver_step(&self) -> Result<bool, SolverError> {
+    async fn exec_solver_step(&self) -> Result<SolverResponse, SolverError> {
       // Check if the schedule is triggered.
       for trigger_time in self.schedule.as_ref().unwrap().upcoming(Utc).take(1) {
         // TODO: check the current time against the trigger time.
       }
 
       // Return false to show that the condition han't been met.
-      Ok(false)
+      Ok(SolverResponse { succeeded: false, message: String::new() })
     }
 
-    async fn final_exec(&self) -> Result<bool, SolverError> {
+    async fn final_exec(&self) -> Result<SolverResponse, SolverError> {
         Err(SolverError::NotImplementedError)
     }
 }

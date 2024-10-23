@@ -23,6 +23,11 @@ where
     pub guard: Arc<Mutex<bool>>,
 }
 
+pub struct SolverResponse {
+    pub succeeded: bool,
+    pub message: String,
+}
+
 pub enum SolverError {
     MisleadingSelector(H256),
     ParamError(String),
@@ -52,8 +57,8 @@ impl Display for SolverError {
 pub trait Solver {
     fn app(&self) -> String;
     fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error>;
-    async fn exec_solver_step(&self) -> Result<bool, SolverError>;
-    async fn final_exec(&self) -> Result<bool, SolverError>;
+    async fn exec_solver_step(&self) -> Result<SolverResponse, SolverError>;
+    async fn final_exec(&self) -> Result<SolverResponse, SolverError>;
 }
 
 pub fn selector(app: String) -> H256 {
