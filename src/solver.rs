@@ -24,15 +24,16 @@ where
 }
 
 pub enum SolverError {
-    UnknownSelector(H256),
+    MisleadingSelector(H256),
     ParamError(String),
     ExecError(String),
+    NotImplementedError,
 }
 
 impl Display for SolverError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SolverError::UnknownSelector(s) => {
+            SolverError::MisleadingSelector(s) => {
                 write!(f, "UnknownSelector: {}", s)
             }
             SolverError::ParamError(s) => {
@@ -41,6 +42,9 @@ impl Display for SolverError {
             SolverError::ExecError(s) => {
                 write!(f, "Execution error, {}", s)
             }
+            SolverError::NotImplementedError => {
+                write!(f, "Not implemented")
+            }
         }
     }
 }
@@ -48,7 +52,6 @@ impl Display for SolverError {
 pub trait Solver {
     fn app(&self) -> String;
     fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error>;
-    async fn init_exec(&self);
     async fn exec_solver_step(&self) -> Result<bool, SolverError>;
     async fn final_exec(&self) -> Result<bool, SolverError>;
 }

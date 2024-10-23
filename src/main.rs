@@ -69,7 +69,9 @@ pub struct Args {
 async fn main() {
     // Get args
     let args = Args::parse();
-    let limit_order_wallet = args.limit_order_wallet_private_key.with_chain_id(args.chain_id);
+    let limit_order_wallet = args
+        .limit_order_wallet_private_key
+        .with_chain_id(args.chain_id);
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
     let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
         mpsc::channel(100);
@@ -89,7 +91,12 @@ async fn main() {
     println!("Connected successfully!");
 
     let limit_order_wallet_address = limit_order_wallet.address();
-    let limit_order_provider = Arc::new(limit_order_provider.ok().unwrap().with_signer(limit_order_wallet));
+    let limit_order_provider = Arc::new(
+        limit_order_provider
+            .ok()
+            .unwrap()
+            .with_signer(limit_order_wallet),
+    );
 
     // Addresses of specific solvers contracts.
     let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();

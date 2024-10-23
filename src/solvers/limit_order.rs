@@ -12,14 +12,13 @@ use ethers::{
     core::abi::ethabi::ethereum_types::FromDecStrErr,
     prelude::abigen,
     providers::Middleware,
-    types::{Address, Bytes, H160, H256, U256},
+    types::{Address, Bytes, H160, U256},
 };
 use ethers_core::{
     abi::{self, Token},
     utils::parse_units,
 };
 use fixed_hash::rustc_hex::FromHexError;
-use keccak_hash::keccak;
 use parse_duration;
 use std::{str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -38,7 +37,7 @@ pub const SWAP_POOL_NAME: &str = "SWAP_POOL";
 
 pub struct LimitOrderSolver<M> {
     // Solver address
-    solver_address: Address,
+    _solver_address: Address, // To be used after fixing associated data
 
     // Contract addresses to be called.
     proxy_address: Address,
@@ -76,11 +75,10 @@ struct FlashLoanData {
 
 impl AbiEncode for FlashLoanData {
     fn encode(self) -> Vec<u8> {
-        return abi::encode(&[
-            Token::Bytes(self.provider.encode()),
-            Token::Bytes(self.amount_a.encode()),
-            Token::Bytes(self.amount_b.encode()),
-        ]);
+        let mut res = self.provider.encode();
+        res.extend(self.amount_a.encode());
+        res.extend(self.amount_b.encode());
+        res
     }
 }
 
@@ -92,7 +90,7 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
         println!("Event received: {}", event);
         let flash_liquidity_selector = solver::selector(APP_SELECTOR.to_string());
         if flash_liquidity_selector != event.selector.into() {
-            return Err(SolverError::UnknownSelector(event.selector.into()));
+            return Err(SolverError::MisleadingSelector(event.selector.into()));
         }
 
         let flash_loan_address = params.extra_contract_addresses.get(FLASH_LOAN_NAME);
@@ -110,7 +108,7 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
         let mut ret = LimitOrderSolver {
             proxy_address: event.proxy_address,
             call_breaker_address: params.call_breaker_address,
-            solver_address: params.solver_address,
+            _solver_address: params.solver_address,
             flash_loan_address: *flash_loan_address.unwrap(),
             swap_pool_address: *swap_pool_address.unwrap(),
             call_breaker_contract: CallBreaker::new(
@@ -194,8 +192,6 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
         self.time_limit.clone()
     }
 
-    async fn init_exec(&self) {}
-
     async fn exec_solver_step(&self) -> Result<bool, SolverError> {
         if let Err(err) = &self.amount {
             return Err(SolverError::ExecError(err.to_string()));
@@ -231,7 +227,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.give_token.ok().unwrap(),
-                gas: 1000000.into(),
+                gas: 10000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
                     spender: self.swap_pool_address,
                     amount: dai_liquidity_wei.into(),
@@ -242,7 +238,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.take_token.ok().unwrap(),
-                gas: 1000000.into(),
+                gas: 10000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
                     spender: self.swap_pool_address,
                     amount: weth_liquidity_wei.into(),
@@ -253,7 +249,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.swap_pool_address,
-                gas: 1000000.into(),
+                gas: 10000000.into(),
                 callvalue: SwapPoolCalls::ProvideLiquidityToDAIETHPool(
                     ProvideLiquidityToDAIETHPoolCall {
                         provider: self.call_breaker_address,
@@ -267,7 +263,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.proxy_address,
-                gas: 1000000.into(),
+                gas: 10000000.into(),
                 callvalue: LaminatedProxyCalls::Pull(PullCall {
                     seq_number: self.sequence_number,
                 })
@@ -277,7 +273,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.swap_pool_address,
-                gas: 1000000.into(),
+                gas: 10000000.into(),
                 callvalue: SwapPoolCalls::CheckSlippage(CheckSlippageCall {
                     max_deviation_percentage: *self.slippage.as_ref().ok().unwrap(),
                 })
@@ -287,7 +283,7 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.swap_pool_address,
-                gas: 1000000.into(),
+                gas: 10000000.into(),
                 callvalue: SwapPoolCalls::WithdrawLiquidityFromDAIETHPool(
                     WithdrawLiquidityFromDAIETHPoolCall {
                         provider: self.call_breaker_address,
@@ -327,44 +323,9 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
                 returnvalue: Bytes::new(),
             },
         ];
-        let associated_data_keys: Vec<H256> = vec![
-            keccak("tipYourBartender".encode()).as_fixed_bytes().into(),
-            keccak("pullIndex".encode()).as_fixed_bytes().into(),
-        ];
-        let associated_data_values =
-            vec![self.solver_address.encode(), self.sequence_number.encode()];
-        let associated_data: Bytes = abi::encode(&[
-            Token::Bytes(associated_data_keys.encode()),
-            Token::Bytes(associated_data_values.encode()),
-        ])
-        .into();
-        let hintdices_keys: Vec<H256> = vec![
-            keccak(call_objects[0].clone().encode())
-                .as_fixed_bytes()
-                .into(),
-            keccak(call_objects[1].clone().encode())
-                .as_fixed_bytes()
-                .into(),
-            keccak(call_objects[2].clone().encode())
-                .as_fixed_bytes()
-                .into(),
-            keccak(call_objects[3].clone().encode())
-                .as_fixed_bytes()
-                .into(),
-            keccak(call_objects[4].clone().encode())
-                .as_fixed_bytes()
-                .into(),
-            keccak(call_objects[5].clone().encode())
-                .as_fixed_bytes()
-                .into(),
-        ];
-        let hintdices_values: Vec<U256> =
-            vec![0.into(), 1.into(), 2.into(), 3.into(), 4.into(), 5.into()];
-        let hintdices: Bytes = abi::encode(&[
-            Token::Bytes(hintdices_keys.encode()),
-            Token::Bytes(hintdices_values.encode()),
-        ])
-        .into();
+
+        let associated_data: Bytes = Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000240364975c732e2b61ede80abbc6666bc882f0e45406caaa44bed3e13479c1863632ec94a0831e53d3569cd147364f65fbf6465a359bba763dcbf3dbb7d995bcc0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000014c0aa0ed2e2772d2da76a87403dfa3acfb227f84c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002b").unwrap();
+        let hintdices: Bytes = Bytes::from_str("0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000005a09a07afede480f85ceccf5474838a546fa135535df6275253965fb7f1b3c125cfa8786037f23b62b01059be12af56c3d2807f1e943ca017d3af7eaa8f0cd847c5473082037dc742ce6e39732901291c47bb050b71283ecbd68dd6ea49a084c1344dc7678d49e0680418dc84ab782fd7af5e58f117d936515e73a0ebc135d71d0b3704a9eb16fdefeb02f32e67964c41285181b3b498bfdb42106126f02efa1a000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000004").unwrap();
         let flash_loan_data: Bytes = FlashLoanData {
             provider: self.flash_loan_address,
             amount_a: dai_liquidity_wei.into(),
