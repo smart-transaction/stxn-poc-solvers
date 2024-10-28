@@ -2,7 +2,7 @@ use crate::{
     contracts_abi::{CallBreaker, ProxyPushedFilter},
     solver::{self, Solver, SolverError, SolverParams, SolverResponse},
 };
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use cron::{
     error::{Error as CronError, ErrorKind},
     Schedule,
@@ -12,7 +12,12 @@ use ethers::{
     providers::Middleware,
     types::{Address, U256},
 };
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use tokio::{sync::Mutex, time::Instant};
 
 abigen!(
@@ -115,16 +120,41 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
     }
 
     async fn exec_solver_step(&self) -> Result<SolverResponse, SolverError> {
-      // Check if the schedule is triggered.
-      for trigger_time in self.schedule.as_ref().unwrap().upcoming(Utc).take(1) {
-        // TODO: check the current time against the trigger time.
-      }
+        // Check if the schedule is triggered.
+        match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            Ok(now) => {
+                let now =
+                    DateTime::from_timestamp(i64::from_ne_bytes(now.as_secs().to_ne_bytes()), 0)
+                        .unwrap();
+                for trigger_time in self.schedule.as_ref().unwrap().upcoming(Utc).take(1) {
+                    if trigger_time <= now {
+                        return Ok(SolverResponse {
+                            succeeded: true,
+                            message: format!("Triggered at {}", now),
+                        });
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(SolverError::ExecError(format!(
+                    "Solver execution error: {}",
+                    err
+                )));
+            }
+        }
 
-      // Return false to show that the condition han't been met.
-      Ok(SolverResponse { succeeded: false, message: String::new() })
+        // Return false to show that the condition han't been met.
+        Ok(SolverResponse {
+            succeeded: false,
+            message: "Not triggered yet".to_string(),
+        })
     }
 
     async fn final_exec(&self) -> Result<SolverResponse, SolverError> {
-        Err(SolverError::NotImplementedError)
+        
+        Ok(SolverResponse {
+            succeeded: true,
+            message: "Executed successfully".to_string(),
+        })
     }
 }

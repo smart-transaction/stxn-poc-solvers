@@ -52,13 +52,7 @@ pub struct Args {
     pub call_breaker_address: Address,
 
     #[arg(long)]
-    pub flash_loan_address: Address,
-
-    #[arg(long)]
-    pub swap_pool_address: Address,
-
-    #[arg(long)]
-    pub limit_order_wallet_private_key: LocalWallet,
+    pub cleanapp_wallet_private_key: LocalWallet,
 
     #[arg(long, default_value_t = 1)]
     pub tick_secs: u64,
@@ -71,8 +65,8 @@ pub struct Args {
 async fn main() {
     // Get args
     let args = Args::parse();
-    let limit_order_wallet = args
-        .limit_order_wallet_private_key
+    let cleanapp_wallet = args
+        .cleanapp_wallet_private_key
         .with_chain_id(args.chain_id);
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
     let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
@@ -84,43 +78,38 @@ async fn main() {
         "Connecting to the chain with URL {} ...",
         args.ws_chain_url.as_str()
     );
-    let limit_order_provider = Provider::<Ws>::connect(args.ws_chain_url.as_str()).await;
-    if limit_order_provider.is_err() {
+    let cleanapp_provider = Provider::<Ws>::connect(args.ws_chain_url.as_str()).await;
+    if cleanapp_provider.is_err() {
         fatal!(
             "Failed connection to the chain: {}",
-            limit_order_provider.err().unwrap()
+            cleanapp_provider.err().unwrap()
         );
     }
     println!("Connected successfully!");
 
-    let limit_order_wallet_address = limit_order_wallet.address();
-    let limit_order_provider = Arc::new(
-        limit_order_provider
+    let cleanapp_wallet_address = cleanapp_wallet.address();
+    let cleanapp_provider = Arc::new(
+        cleanapp_provider
             .ok()
             .unwrap()
-            .with_signer(limit_order_wallet),
+            .with_signer(cleanapp_wallet),
     );
-
-    // Addresses of specific solvers contracts.
-    let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();
-    custom_contracts_addresses.insert("FLASH_LOAN".to_string(), args.flash_loan_address);
-    custom_contracts_addresses.insert("SWAP_POOL".to_string(), args.swap_pool_address);
 
     let mut solver_params = HashMap::new();
     solver_params.insert(
         selector(cleanapp_scheduler::APP_SELECTOR.to_string()),
         SolverParams {
             call_breaker_address: args.call_breaker_address,
-            solver_address: limit_order_wallet_address,
-            middleware: limit_order_provider.clone(),
-            extra_contract_addresses: custom_contracts_addresses.clone(),
+            solver_address: cleanapp_wallet_address,
+            middleware: cleanapp_provider.clone(),
+            extra_contract_addresses: HashMap::new(),
             guard: Arc::new(Mutex::new(true)),
         },
     );
 
     let mut listener = LaminatorListener::new(
         args.laminator_address,
-        limit_order_provider.clone(),
+        cleanapp_provider.clone(),
         solver_params,
         exec_set.clone(),
         Duration::new(args.tick_secs, args.tick_nanos),
@@ -132,7 +121,7 @@ async fn main() {
     // Axum setup
     let app = Router::new()
         .route("/", get(|| async { "Smart Transactions Solver" }))
-        .route("/stats/limit_order", get(get_stats_json))
+        .route("/stats/cleanapp", get(get_stats_json))
         .with_state(stats_map)
         .route("/get_report", post({
             let shared_state = Arc::clone(&reports_pool);
