@@ -28,7 +28,7 @@ set -e
 
 CLOUD_REGION="us-central1"
 PROJECT_NAME="solver-438012"
-DOCKER_IMAGE="solver-docker-repo/stxn-solver-image"
+DOCKER_IMAGE="solver-docker-repo/stxn-cleanapp-solver-image"
 DOCKER_TAG="${CLOUD_REGION}-docker.pkg.dev/${PROJECT_NAME}/${DOCKER_IMAGE}"
 
 echo "Building and pushing docker image..."

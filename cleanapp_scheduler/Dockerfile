@@ -21,7 +21,7 @@ RUN apt-get install -y ca-certificates
 COPY certificates/* /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 
-COPY --from=builder /usr/local/cargo/bin/solver /usr/local/bin/solver
+COPY --from=builder /usr/local/cargo/bin/cleanapp_solver /usr/local/bin/cleanapp_solver
 
-EXPOSE 9999/tcp
-CMD "solver" "--port=9999" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--kitn-owner-address=${KITN_OWNER_ADDRESS}" "--cleanapp-wallet-private-key=${CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY}" "--tick-secs=${TICK_SECS}" "--tick-nanos=${TICK_NANOS}"
+EXPOSE 8888/tcp
+CMD "cleanapp_solver" "--port=8888" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--kitn-owner-address=${KITN_OWNER_ADDRESS}" "--cleanapp-wallet-private-key=${CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY}" "--tick-secs=${TICK_SECS}" "--tick-nanos=${TICK_NANOS}"

@@ -53,7 +53,7 @@ pub struct CleanAppSchedulerSolver<M> {
     guard: Arc<Mutex<bool>>,
 
     // Reports Pool
-    reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>>,
+    reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
 }
 
 impl<M: Middleware + Clone> CleanAppSchedulerSolver<M> {
@@ -61,7 +61,7 @@ impl<M: Middleware + Clone> CleanAppSchedulerSolver<M> {
         event: CallPushedFilter,
         params: SolverParams<M>,
         proxy_address: Address,
-        reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>>,
+        reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
     ) -> Result<CleanAppSchedulerSolver<M>, SolverError> {
         println!("Event received: {}", event);
         let mut ret = CleanAppSchedulerSolver {

@@ -76,7 +76,7 @@ async fn main() {
     let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
         mpsc::channel(100);
     let exec_set = Arc::new(Mutex::new(JoinSet::new()));
-    let reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>> =
+    let reports_pool: Arc<Mutex<HashMap<Address, U256>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     println!(
@@ -133,7 +133,7 @@ async fn main() {
         .route("/stats/cleanapp", get(get_stats_json))
         .with_state(stats_map)
         .route(
-            "/get_report",
+            "/report",
             post({
                 let shared_state = Arc::clone(&reports_pool);
                 move |body| aggregate_report(body, shared_state)

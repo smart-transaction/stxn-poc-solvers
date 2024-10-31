@@ -26,8 +26,8 @@ do
         echo "Using dev environment"
         CHAIN_ID=21363
         WS_CHAIN_URL=wss://service.lestnet.org:8888/
-        LAMINATOR_ADDRESS=0xeBD13182C9e415a5Df7BF694110FEe0aCbfa7A36
-        CALL_BREAKER_ADDRESS=0x89252CA9338BC38A32E45d71b71a5de210B782C7
+        LAMINATOR_ADDRESS=0x36aB7A6ad656BC19Da2D5Af5b46f3cf3fc47274D
+        CALL_BREAKER_ADDRESS=0x23912387357621473Ff6514a2DC20Df14cd72E7f
         KITN_OWNER_ADDRESS=0xF821AdA310c3c7DA23aBEa279bA5Bf22B359A7e1
         TICK_SECS=1
         TICK_NANOS=0
@@ -77,7 +77,7 @@ DOCKER_IMAGE="solver-docker-repo/stxn-solver-image"
 # Docker images
 DOCKER_LOCATION="us-central1-docker.pkg.dev"
 DOCKER_PREFIX="${DOCKER_LOCATION}/solver-438012/solver-docker-repo"
-SOLVER_DOCKER_IMAGE="${DOCKER_PREFIX}/stxn-solver-image:${OPT}"
+SOLVER_DOCKER_IMAGE="${DOCKER_PREFIX}/stxn-cleanapp-solver-image:${OPT}"
 
 # Create docker-compose.yml file.
 cat >docker-compose.yml << COMPOSE
@@ -85,7 +85,7 @@ version: '3'
 
 services:
   solver:
-    container_name: stxn_solver
+    container_name: stxn_cleanapp_solver
     image: ${SOLVER_DOCKER_IMAGE}
     environment:
       - CHAIN_ID=${CHAIN_ID}
@@ -99,7 +99,7 @@ services:
       - TICK_SECS=${TICK_SECS}
       - TICK_NANOS=${TICK_NANOS}
     ports:
-      - 9999:9999
+      - 8888:8888
 
 COMPOSE
 

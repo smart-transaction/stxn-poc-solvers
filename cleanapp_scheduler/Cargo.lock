@@ -520,6 +520,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
+name = "cleanapp_solver"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "bigdecimal",
+ "chrono",
+ "clap",
+ "cron",
+ "ethers",
+ "ethers-core",
+ "fatal",
+ "fixed-hash",
+ "futures",
+ "keccak-hash",
+ "num-bigint 0.4.6",
+ "parse_duration",
+ "serde",
+ "serde_json",
+ "threadpool",
+ "tokio",
+ "uuid 1.10.0",
+]
+
+[[package]]
 name = "coins-bip32"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3136,30 +3160,6 @@ dependencies = [
  "phf",
  "thiserror",
  "unicode-xid",
-]
-
-[[package]]
-name = "solver"
-version = "0.2.0"
-dependencies = [
- "axum",
- "bigdecimal",
- "chrono",
- "clap",
- "cron",
- "ethers",
- "ethers-core",
- "fatal",
- "fixed-hash",
- "futures",
- "keccak-hash",
- "num-bigint 0.4.6",
- "parse_duration",
- "serde",
- "serde_json",
- "threadpool",
- "tokio",
- "uuid 1.10.0",
 ]
 
 [[package]]

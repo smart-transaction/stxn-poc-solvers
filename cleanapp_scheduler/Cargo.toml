@@ -1,6 +1,6 @@
 [package]
-name = "solver"
-version = "0.2.0"
+name = "cleanapp_solver"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]

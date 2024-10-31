@@ -38,7 +38,7 @@ pub struct LaminatorListener<M: Clone> {
     stats_tx: Sender<TimerExecutorStats>,
 
     // CleanApp reports pool
-    reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>>,
+    reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
 }
 
 impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
@@ -49,7 +49,7 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
         exec_set: Arc<Mutex<JoinSet<()>>>,
         tick_duration: Duration,
         stats_tx: Sender<TimerExecutorStats>,
-        reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>>,
+        reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
     ) -> LaminatorListener<M> {
         LaminatorListener::<M> {
             laminated_proxy_address,

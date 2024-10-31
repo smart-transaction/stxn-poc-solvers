@@ -7,31 +7,23 @@ use tokio::sync::Mutex;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Report {
-    cron: String,
     account: Address,
     amount: U256,
 }
 
 pub async fn aggregate_report(
     Json(body): Json<Report>,
-    reports: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>>,
+    reports: Arc<Mutex<HashMap<Address, U256>>>,
 ) {
+    println!("Report: {:#?}", body);
     let mut reports = reports.lock().await;
-    match reports.get_mut(&body.cron)  {
-        Some(cron_reports) => {
-          match cron_reports.get_mut(&body.account) {
-            Some(amount) => {
-              *amount += body.amount;
-            }
-            None => {
-              cron_reports.insert(body.account, body.amount);
-            }
-          }
+    match reports.get_mut(&body.account) {
+        Some(amount) => {
+            *amount += body.amount;
         }
         None => {
-          let mut cron_reports = HashMap::new();
-          cron_reports.insert(body.account, body.amount);
-          reports.insert(body.cron.clone(), cron_reports);
+            reports.insert(body.account, body.amount);
         }
     }
+    println!("{:#?}", reports);
 }
