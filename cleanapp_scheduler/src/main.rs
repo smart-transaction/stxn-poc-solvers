@@ -3,16 +3,17 @@ use axum::{
     serve,
 };
 use clap::Parser;
+use contracts_abi::Laminator;
 use ethers::{
     core::types::Address,
     middleware::MiddlewareBuilder,
     providers::{Provider, Ws},
-    signers::{LocalWallet, Signer}, types::U256,
+    signers::{LocalWallet, Signer},
+    types::U256,
 };
 use fatal::fatal;
 use reports_aggr::aggregate_report;
-use solver::{selector, SolverParams};
-use solvers::cleanapp_scheduler;
+use solver::SolverParams;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     net::TcpListener,
@@ -52,6 +53,9 @@ pub struct Args {
     pub call_breaker_address: Address,
 
     #[arg(long)]
+    pub kitn_owner_address: Address,
+
+    #[arg(long)]
     pub cleanapp_wallet_private_key: LocalWallet,
 
     #[arg(long, default_value_t = 1)]
@@ -72,7 +76,8 @@ async fn main() {
     let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
         mpsc::channel(100);
     let exec_set = Arc::new(Mutex::new(JoinSet::new()));
-    let reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let reports_pool: Arc<Mutex<HashMap<String, HashMap<Address, U256>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     println!(
         "Connecting to the chain with URL {} ...",
@@ -88,27 +93,31 @@ async fn main() {
     println!("Connected successfully!");
 
     let cleanapp_wallet_address = cleanapp_wallet.address();
-    let cleanapp_provider = Arc::new(
-        cleanapp_provider
-            .ok()
-            .unwrap()
-            .with_signer(cleanapp_wallet),
-    );
+    let cleanapp_provider = Arc::new(cleanapp_provider.ok().unwrap().with_signer(cleanapp_wallet));
 
-    let mut solver_params = HashMap::new();
-    solver_params.insert(
-        selector(cleanapp_scheduler::APP_SELECTOR.to_string()),
-        SolverParams {
-            call_breaker_address: args.call_breaker_address,
-            solver_address: cleanapp_wallet_address,
-            middleware: cleanapp_provider.clone(),
-            extra_contract_addresses: HashMap::new(),
-            guard: Arc::new(Mutex::new(true)),
-        },
+    let solver_params = SolverParams {
+        call_breaker_address: args.call_breaker_address,
+        solver_address: cleanapp_wallet_address,
+        middleware: cleanapp_provider.clone(),
+        guard: Arc::new(Mutex::new(true)),
+    };
+
+    // Extract laminated proxy address
+    let laminator_contract = Laminator::new(args.laminator_address, cleanapp_provider.clone());
+    let laminated_proxy_address = laminator_contract
+        .compute_proxy_address(args.kitn_owner_address)
+        .await;
+    if let Err(err) = laminated_proxy_address {
+        fatal!("Cannot get laminated proxy address: {}", err);
+    }
+    let laminated_proxy_address = laminated_proxy_address.unwrap();
+    println!(
+        "Use laminated proxy at the address {}",
+        laminated_proxy_address
     );
 
     let mut listener = LaminatorListener::new(
-        args.laminator_address,
+        laminated_proxy_address,
         cleanapp_provider.clone(),
         solver_params,
         exec_set.clone(),
@@ -123,11 +132,13 @@ async fn main() {
         .route("/", get(|| async { "Smart Transactions Solver" }))
         .route("/stats/cleanapp", get(get_stats_json))
         .with_state(stats_map)
-        .route("/get_report", post({
-            let shared_state = Arc::clone(&reports_pool);
-            move |body| aggregate_report(body, shared_state)
-        }),
-    );
+        .route(
+            "/get_report",
+            post({
+                let shared_state = Arc::clone(&reports_pool);
+                move |body| aggregate_report(body, shared_state)
+            }),
+        );
 
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{}", args.port))
         .await

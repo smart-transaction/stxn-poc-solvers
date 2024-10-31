@@ -5,7 +5,7 @@ use tokio::{sync::mpsc::Sender, time::{sleep, Instant}};
 use uuid::Uuid;
 
 use crate::{
-    contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
+    contracts_abi::{laminator::SolverData, CallPushedFilter},
     solver::Solver,
     stats::{Status, TimerExecutorStats, TransactionStatus},
 };
@@ -55,7 +55,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
     }
 
     // Execute the FlashLiquidity executor with given params.
-    pub async fn execute(&self, event: ProxyPushedFilter) {
+    pub async fn execute(&self, event: CallPushedFilter) {
         println!("Executor {} started", self.id);
         // Initialize timer
         let now = Instant::now();
@@ -85,7 +85,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                             response.message.clone(),
                             &time_limit,
                             &now,
-                            &event.data_values,
+                            &event.data,
                         )
                         .await;
                         match self.solver.final_exec().await {
@@ -100,7 +100,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                         response.message.clone(),
                                         &time_limit,
                                         &now,
-                                        &event.data_values,
+                                        &event.data,
                                     )
                                     .await;
                                     println!("Executor {} successfully finished", self.id);
@@ -114,7 +114,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                         response.message.clone(),
                                         &time_limit,
                                         &now,
-                                        &event.data_values,
+                                        &event.data,
                                     )
                                     .await;
                                     last_transaction_status = TransactionStatus::TransactionPending;
@@ -130,7 +130,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                     err.to_string(),
                                     &time_limit,
                                     &now,
-                                    &event.data_values,
+                                    &event.data,
                                 )
                                 .await;
                                 last_transaction_status = TransactionStatus::TransactionFailed;
@@ -145,7 +145,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                             response.message.clone(),
                             &time_limit,
                             &now,
-                            &event.data_values,
+                            &event.data,
                         )
                         .await;
                         last_transaction_status = TransactionStatus::StepPending;
@@ -161,7 +161,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                         err.to_string(),
                         &time_limit,
                         &now,
-                        &event.data_values,
+                        &event.data,
                     )
                     .await;
                     last_transaction_status = TransactionStatus::StepFailed;
@@ -179,7 +179,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
             last_message,
             &time_limit,
             &now,
-            &event.data_values,
+            &event.data,
         )
         .await;
         println!("Executor {} finished by timeout", self.id);
@@ -195,7 +195,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
         message: String,
         time_limit: &Duration,
         now: &Instant,
-        params: &Vec<AdditionalData>,
+        params: &Vec<SolverData>,
     ) {
         let remaining;
         if status == Status::Running {

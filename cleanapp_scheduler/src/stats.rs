@@ -8,7 +8,7 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::contracts_abi::laminator::AdditionalData;
+use crate::contracts_abi::SolverData;
 
 // Executor statistics
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ pub struct TimerExecutorStats {
     pub status: Status,
     pub transaction_status: TransactionStatus,
     pub message: String,
-    pub params: Vec<AdditionalData>,
+    pub params: Vec<SolverData>,
     pub elapsed: Duration,
     pub remaining: Duration,
 }

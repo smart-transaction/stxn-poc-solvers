@@ -8,15 +8,11 @@ use crate::{
     solver::{self, Solver, SolverError, SolverParams, SolverResponse},
 };
 use ethers::{
-    abi::AbiEncode,
+    abi::{self, AbiEncode, Token},
     core::abi::ethabi::ethereum_types::FromDecStrErr,
     prelude::abigen,
     providers::Middleware,
-    types::{Address, Bytes, H160, U256},
-};
-use ethers_core::{
-    abi::{self, Token},
-    utils::parse_units,
+    types::{Address, Bytes, H160, U256}, utils::parse_units,
 };
 use fixed_hash::rustc_hex::FromHexError;
 use parse_duration;

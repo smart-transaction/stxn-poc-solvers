@@ -24,4 +24,4 @@ RUN update-ca-certificates
 COPY --from=builder /usr/local/cargo/bin/solver /usr/local/bin/solver
 
 EXPOSE 9999/tcp
-CMD "solver" "--port=9999" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--flash-loan-address=${FLASH_LOAN_ADDRESS}" "--swap-pool-address=${SWAP_POOL_ADDRESS}" "--limit-order-wallet-private-key=${LIMIT_ORDER_WALLET_PRIVATE_KEY}" "--tick-secs=${TICK_SECS}" "--tick-nanos=${TICK_NANOS}"
+CMD "solver" "--port=9999" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--kitn-owner-address=${KITN_OWNER_ADDRESS}" "--cleanapp-wallet-private-key=${CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY}" "--tick-secs=${TICK_SECS}" "--tick-nanos=${TICK_NANOS}"
