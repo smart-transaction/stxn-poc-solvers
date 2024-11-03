@@ -22,6 +22,9 @@ pub struct LaminatorListener<M: Clone> {
     // The address of the laminator contract.
     laminated_proxy_address: Address,
 
+    // KITN disbursement scheduler address.
+    kitn_disbursement_scheduler_address: Address,
+
     // The middleware to be used
     middleware: Arc<M>,
 
@@ -44,6 +47,7 @@ pub struct LaminatorListener<M: Clone> {
 impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
     pub fn new(
         laminated_proxy_address: Address,
+        kitn_disbursement_scheduler_address: Address,
         middleware: Arc<M>,
         solver_params: SolverParams<M>,
         exec_set: Arc<Mutex<JoinSet<()>>>,
@@ -53,6 +57,7 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
     ) -> LaminatorListener<M> {
         LaminatorListener::<M> {
             laminated_proxy_address,
+            kitn_disbursement_scheduler_address,
             middleware,
             solver_params,
             exec_set,
@@ -72,7 +77,7 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
             match events.stream().await {
                 Ok(stream) => {
                     let mut stream_take = stream.take(10);
-                    println!("Listening the event ProxyPushed ...");
+                    println!("Listening the event CallPushed ...");
                     while let Some(Ok(call_pushed)) = stream_take.next().await {
                         let mut exec_set = self.exec_set.lock().await;
                         let tick_duration = self.tick_duration.clone();
@@ -80,11 +85,13 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
                         let reports_pool = self.reports_pool.clone();
                         let solver_params = self.solver_params.clone();
                         let laminated_proxy_address = self.laminated_proxy_address;
+                        let kitn_disbursement_scheduler_address = self.kitn_disbursement_scheduler_address;
                         exec_set.spawn(async move {
                             let clean_app_scheduler_solver = CleanAppSchedulerSolver::new(
                                 call_pushed.clone(),
                                 solver_params,
                                 laminated_proxy_address,
+                                kitn_disbursement_scheduler_address,
                                 reports_pool,
                             );
                             if let Ok(clean_app_scheduler_solver) = clean_app_scheduler_solver {

@@ -24,4 +24,13 @@ RUN update-ca-certificates
 COPY --from=builder /usr/local/cargo/bin/cleanapp_solver /usr/local/bin/cleanapp_solver
 
 EXPOSE 8888/tcp
-CMD "cleanapp_solver" "--port=8888" "--chain-id=${CHAIN_ID}" "--ws-chain-url=${WS_CHAIN_URL}" "--laminator-address=${LAMINATOR_ADDRESS}" "--call-breaker-address=${CALL_BREAKER_ADDRESS}" "--kitn-owner-address=${KITN_OWNER_ADDRESS}" "--cleanapp-wallet-private-key=${CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY}" "--tick-secs=${TICK_SECS}" "--tick-nanos=${TICK_NANOS}"
+CMD "cleanapp_solver" \
+   "--port=8888" \
+   "--chain-id=${CHAIN_ID}" \
+   "--ws-chain-url=${WS_CHAIN_URL}" \
+   "--laminator-address=${LAMINATOR_ADDRESS}" \
+   "--call-breaker-address=${CALL_BREAKER_ADDRESS}" \
+   "--kitn-disbursement-scheduler-address=${KITN_DISBURSEMENT_SCHEDULER_ADDRESS}" \
+   "--cleanapp-wallet-private-key=${CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY}" \
+   "--tick-secs=${TICK_SECS}" \
+   "--tick-nanos=${TICK_NANOS}"

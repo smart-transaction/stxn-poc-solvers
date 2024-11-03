@@ -39,8 +39,7 @@ pub struct TimerExecutorStats {
     pub transaction_status: TransactionStatus,
     pub message: String,
     pub params: Vec<SolverData>,
-    pub elapsed: Duration,
-    pub remaining: Duration,
+    pub remaining_secs: i64,
 }
 
 pub async fn get_stats_json(

@@ -1,8 +1,8 @@
+use chrono::{DateTime, Utc};
 use ethers::types::Address;
 use std::{
     fmt::{self, Display},
     sync::Arc,
-    time::Duration,
 };
 use tokio::sync::Mutex;
 
@@ -20,8 +20,10 @@ where
 pub struct SolverResponse {
     pub succeeded: bool,
     pub message: String,
+    pub remaining_secs: i64,
 }
 
+#[derive(Clone, Debug)]
 pub enum SolverError {
     ParamError(String),
     ExecError(String),
@@ -42,7 +44,7 @@ impl Display for SolverError {
 
 pub trait Solver {
     fn app(&self) -> String;
-    fn time_limit(&self) -> Result<Duration, parse_duration::parse::Error>;
+    fn schedule_time(&self) -> Result<DateTime<Utc>, SolverError>;
     async fn exec_solver_step(&self) -> Result<SolverResponse, SolverError>;
     async fn final_exec(&self) -> Result<SolverResponse, SolverError>;
 }

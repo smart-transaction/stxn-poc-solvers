@@ -12,7 +12,7 @@ use ethers::{
     types::U256,
 };
 use fatal::fatal;
-use reports_aggr::aggregate_report;
+use reports_aggr::{aggregate_report, get_reports_stats};
 use solver::SolverParams;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
@@ -53,7 +53,7 @@ pub struct Args {
     pub call_breaker_address: Address,
 
     #[arg(long)]
-    pub kitn_owner_address: Address,
+    pub kitn_disbursement_scheduler_address: Address,
 
     #[arg(long)]
     pub cleanapp_wallet_private_key: LocalWallet,
@@ -105,7 +105,7 @@ async fn main() {
     // Extract laminated proxy address
     let laminator_contract = Laminator::new(args.laminator_address, cleanapp_provider.clone());
     let laminated_proxy_address = laminator_contract
-        .compute_proxy_address(args.kitn_owner_address)
+        .compute_proxy_address(cleanapp_wallet_address)
         .await;
     if let Err(err) = laminated_proxy_address {
         fatal!("Cannot get laminated proxy address: {}", err);
@@ -118,6 +118,7 @@ async fn main() {
 
     let mut listener = LaminatorListener::new(
         laminated_proxy_address,
+        args.kitn_disbursement_scheduler_address,
         cleanapp_provider.clone(),
         solver_params,
         exec_set.clone(),
@@ -125,13 +126,14 @@ async fn main() {
         stats_tx.clone(),
         reports_pool.clone(),
     );
-    let stats_map_copy = Arc::clone(&stats_map);
 
     // Axum setup
     let app = Router::new()
         .route("/", get(|| async { "Smart Transactions Solver" }))
         .route("/stats/cleanapp", get(get_stats_json))
-        .with_state(stats_map)
+        .with_state(Arc::clone(&stats_map))
+        .route("/reportstats", get(get_reports_stats))
+        .with_state(Arc::clone(&reports_pool))
         .route(
             "/report",
             post({
@@ -152,7 +154,7 @@ async fn main() {
             listener.listen().await;
         });
         exec_set.spawn(async move {
-            run_stats_receive(&mut stats_rx, stats_map_copy).await;
+            run_stats_receive(&mut stats_rx, Arc::clone(&stats_map)).await;
         });
     };
     serve(tcp_listener, app).await.unwrap();
