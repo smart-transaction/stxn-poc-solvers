@@ -52,7 +52,7 @@ cat >up.sh << UP
 
 # Secrets
 cat >.env << ENV
-CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY=\$(gcloud secrets versions access 1 --secret="CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY_${SECRET_SUFFIX}")
+CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY=\$(gcloud secrets versions access 1 --secret="KITN_PRIVATE_KEY_${SECRET_SUFFIX}")
 
 ENV
 

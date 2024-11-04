@@ -14,7 +14,7 @@ if [ "${PROJECT_NAME}" != "${CURRENT_PROJECT}" ]; then
   gcloud config set project ${PROJECT_NAME}
 fi
 
-CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY=$(gcloud secrets versions access 1 --secret="LOCAL_CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY_DEV")
+CLEANAPP_SCHEDULER_WALLET_PRIVATE_KEY=$(gcloud secrets versions access 1 --secret="KITN_PRIVATE_KEY_DEV")
 
 cargo run \
   -- \

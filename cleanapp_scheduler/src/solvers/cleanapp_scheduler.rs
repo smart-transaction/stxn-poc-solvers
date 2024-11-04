@@ -253,8 +253,6 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
         .encode()
         .into();
 
-// associatedData[3] = AdditionalData({key: keccak256(abi.encodePacked("CleanAppSignature")), value: signature});
-
         let call_obj_index_0: U256 = 0.into();
         let call_obj_index_1: U256 = 0.into();
         let hintindices: Bytes = vec![
@@ -287,6 +285,10 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
                         Ok(receipt) => {
                             if let Some(receipt) = receipt {
                                 if let Some(status) = receipt.status {
+                                    if status > 0.into() {
+                                        let mut reports = self.reports_pool.lock().await;
+                                        reports.clear();
+                                    }
                                     return Ok(SolverResponse {
                                         succeeded: status != 0.into(),
                                         message: format!("Transaction status: {}", status),
