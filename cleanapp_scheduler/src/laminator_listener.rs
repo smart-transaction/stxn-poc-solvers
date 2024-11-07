@@ -42,6 +42,9 @@ pub struct LaminatorListener<M: Clone> {
 
     // CleanApp reports pool
     reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
+
+    // Temporaty stores the cron string from the event
+    cron: String,
 }
 
 impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
@@ -64,6 +67,7 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
             tick_duration,
             stats_tx,
             reports_pool,
+            cron: String::new(),
         }
     }
 
@@ -85,25 +89,39 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
                         let reports_pool = self.reports_pool.clone();
                         let solver_params = self.solver_params.clone();
                         let laminated_proxy_address = self.laminated_proxy_address;
-                        let kitn_disbursement_scheduler_address = self.kitn_disbursement_scheduler_address;
+                        let kitn_disbursement_scheduler_address =
+                            self.kitn_disbursement_scheduler_address;
+                        for ad in &call_pushed.data {
+                            match ad.name.as_str() {
+                                "CRON" => {
+                                    self.cron = ad.value.clone();
+                                }
+                                &_ => {}
+                            }
+                        }
+                    
+                        let cron = self.cron.clone();
                         exec_set.spawn(async move {
-                            let clean_app_scheduler_solver = CleanAppSchedulerSolver::new(
+                            match CleanAppSchedulerSolver::new(
                                 call_pushed.clone(),
                                 solver_params,
                                 laminated_proxy_address,
                                 kitn_disbursement_scheduler_address,
                                 reports_pool,
-                            );
-                            if let Ok(clean_app_scheduler_solver) = clean_app_scheduler_solver {
-                                let executor =
-                                    TimerRequestExecutor::<CleanAppSchedulerSolver<M>>::new(
-                                        clean_app_scheduler_solver,
-                                        tick_duration,
-                                        stats_tx,
-                                    );
-                                executor.execute(call_pushed).await;
-                            } else {
-                                println!("Error creating solver: Unknown selector");
+                                cron,
+                            ) {
+                                Ok(clean_app_scheduler_solver) => {
+                                    let executor =
+                                        TimerRequestExecutor::<CleanAppSchedulerSolver<M>>::new(
+                                            clean_app_scheduler_solver,
+                                            tick_duration,
+                                            stats_tx,
+                                        );
+                                    executor.execute(call_pushed).await;
+                                }
+                                Err(err) => {
+                                    println!("Error creating the solver: {}", err);
+                                }
                             }
                         });
                     }

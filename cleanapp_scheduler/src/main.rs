@@ -28,6 +28,7 @@ use crate::laminator_listener::LaminatorListener;
 use crate::stats::{get_stats_json, run_stats_receive, TimerExecutorStats};
 
 mod contracts_abi;
+mod encoded_data;
 mod laminator_listener;
 mod reports_aggr;
 mod solver;
@@ -97,7 +98,6 @@ async fn main() {
 
     let solver_params = SolverParams {
         call_breaker_address: args.call_breaker_address,
-        solver_address: cleanapp_wallet_address,
         middleware: cleanapp_provider.clone(),
         guard: Arc::new(Mutex::new(true)),
     };

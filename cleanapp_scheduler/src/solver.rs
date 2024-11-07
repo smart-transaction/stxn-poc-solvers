@@ -12,7 +12,6 @@ where
     M: Clone,
 {
     pub call_breaker_address: Address,
-    pub solver_address: Address,
     pub middleware: Arc<M>,
     pub guard: Arc<Mutex<bool>>,
 }

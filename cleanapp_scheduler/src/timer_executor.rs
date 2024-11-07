@@ -95,7 +95,6 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                     )
                                     .await;
                                     println!("Executor {} successfully finished", self.id);
-                                    return;
                                 } else {
                                     self.send_stats(
                                         event.sequence_number,
@@ -107,6 +106,11 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                         &event.data,
                                     )
                                     .await;
+                                    println!(
+                                        "Executor {} failed: {}",
+                                        self.id,
+                                        response.message.clone()
+                                    );
                                 }
                             }
                             Err(err) => {
@@ -123,7 +127,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                 .await;
                             }
                         }
-                        return
+                        return;
                     } else {
                         self.send_stats(
                             event.sequence_number,

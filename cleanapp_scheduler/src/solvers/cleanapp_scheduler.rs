@@ -1,9 +1,8 @@
 use crate::{
     contracts_abi::{
-        AdditionalData, CallBreaker, CallObject, CallPushedFilter, LaminatedProxyCalls, PullCall,
+        CallBreaker, CallObject, CallPushedFilter, LaminatedProxyCalls, PullCall,
         ReturnObject,
-    },
-    solver::{Solver, SolverError, SolverParams, SolverResponse},
+    }, encoded_data::{get_associated_data, get_disbursed_data}, solver::{Solver, SolverError, SolverParams, SolverResponse}
 };
 use chrono::{DateTime, Utc};
 use cron::Schedule;
@@ -13,7 +12,6 @@ use ethers::{
     providers::Middleware,
     types::{Address, Bytes, U256},
 };
-use keccak_hash::keccak;
 use std::{collections::HashMap, str::FromStr, sync::Arc, time::SystemTime};
 use tokio::sync::Mutex;
 
@@ -28,9 +26,6 @@ pub const APP_SELECTOR: &str = "CLEANAPP.SCHEDULER";
 pub struct CleanAppSchedulerSolver<M> {
     // Sequence number for laminator proxy call
     sequence_number: U256,
-
-    // Solver address
-    solver_address: Address,
 
     // Proxy Address
     proxy_address: Address,
@@ -61,18 +56,18 @@ impl<M: Middleware + Clone> CleanAppSchedulerSolver<M> {
         proxy_address: Address,
         kitn_disbursement_scheduler_address: Address,
         reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
+        cron: String,
     ) -> Result<CleanAppSchedulerSolver<M>, SolverError> {
         println!("Event received: {}", event);
         let mut ret = CleanAppSchedulerSolver {
             sequence_number: event.sequence_number,
-            solver_address: params.solver_address,
             proxy_address,
             kitn_disbursement_scheduler_address,
             call_breaker_contract: CallBreaker::new(
                 params.call_breaker_address,
                 params.middleware.clone(),
             ),
-            schedule_string: String::new(),
+            schedule_string: cron,
             trigger_time: Err(SolverError::ParamError(
                 "Missing CRON parameter".to_string(),
             )),
@@ -80,31 +75,22 @@ impl<M: Middleware + Clone> CleanAppSchedulerSolver<M> {
             reports_pool,
         };
 
-        // Extract parameters.
         let mut schedule_extracted = false;
-        for ad in &event.data {
-            match ad.name.as_str() {
-                "CRON" => {
-                    ret.schedule_string = ad.value.clone();
-                    match Schedule::from_str(ad.value.as_str()) {
-                        Ok(schedule) => {
-                            for trigger_time in schedule.upcoming(Utc).take(1) {
-                                ret.trigger_time = Ok(trigger_time);
-                            }
-                            schedule_extracted = true;
-                        }
-                        Err(err) => {
-                            ret.trigger_time = Err(SolverError::ParamError(format!(
-                                "Error parsing CRON parameter: {}",
-                                err
-                            )));
-                        }
-                    }
+        // Check that all parameters are successfully extracted.
+        match Schedule::from_str(ret.schedule_string.as_str()) {
+            Ok(schedule) => {
+                for trigger_time in schedule.upcoming(Utc).take(1) {
+                    ret.trigger_time = Ok(trigger_time);
                 }
-                &_ => {}
+                schedule_extracted = true;
+            }
+            Err(err) => {
+                ret.trigger_time = Err(SolverError::ParamError(format!(
+                    "Error parsing CRON parameter: {}",
+                    err
+                )));
             }
         }
-        // Check that all parameters are successfully extracted.
         if !schedule_extracted {
             return Err(SolverError::ParamError(
                 "Missing schedule, the solver won't run".to_string(),
@@ -130,7 +116,7 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
         }
         let trigger_time = self.trigger_time.clone().unwrap();
         // Check if the schedule is triggered.
-        const MAX_BATCH_SIZE: usize = 100;
+        const MAX_BATCH_SIZE: usize = 10;
         match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             Ok(now) => {
                 let now =
@@ -187,7 +173,7 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
             amounts.push(*amount);
         }
 
-        let disbursal_data: Bytes = DisbursalData { receivers, amounts }.encode().into();
+        let disbursal_data = get_disbursed_data(receivers.clone(), amounts.clone());
 
         let call_objects = vec![
             CallObject {
@@ -203,7 +189,7 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
             CallObject {
                 amount: 0.into(),
                 addr: self.kitn_disbursement_scheduler_address,
-                gas: 10000000.into(),
+                gas: 1000000.into(),
                 callvalue: KITNDisburmentSchedulerCalls::VerifySignature(VerifySignatureCall {
                     data: disbursal_data.clone(),
                 })
@@ -232,41 +218,8 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
             },
         ];
 
-        let associated_data: Bytes = vec![
-            AdditionalData {
-                key: keccak("tipYourBartender".encode()).into(),
-                value: self.solver_address.encode().into(),
-            },
-            AdditionalData {
-                key: keccak("pullIndex".encode()).into(),
-                value: self.sequence_number.encode().into(),
-            },
-            AdditionalData {
-                key: keccak("KITNDisbursalData".encode()).into(),
-                value: disbursal_data,
-            },
-            AdditionalData {
-                key: keccak("CleanAppSignature".encode()).into(),
-                value: "rsv".encode().into(),
-            }
-        ]
-        .encode()
-        .into();
-
-        let call_obj_index_0: U256 = 0.into();
-        let call_obj_index_1: U256 = 0.into();
-        let hintindices: Bytes = vec![
-            AdditionalData {
-                key: keccak(call_objects[0].clone().encode()).into(),
-                value: call_obj_index_0.encode().into(),
-            },
-            AdditionalData {
-                key: keccak(call_objects[0].clone().encode()).into(),
-                value: call_obj_index_1.encode().into(),
-            },
-        ]
-        .encode()
-        .into();
+        let associated_data = get_associated_data(self.sequence_number, receivers, amounts);
+        let hintindices = Bytes::from_str("0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000c0baed237ba5681f7a9e0892d5d807f7bddae6ccb06e0a053b4b358cad56dfc2b1000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000b09eb645b7de126aeb2d91436e34148ebde4ff228768eb684ecb19bd1524ac06000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001").unwrap();
 
         let call_bytes: Bytes = call_objects.encode().into();
         let return_bytes: Bytes = return_objects.encode().into();
