@@ -11,7 +11,7 @@ use tokio::{
 };
 
 use crate::{
-    contracts_abi::{CallPushedFilter, LaminatedProxy},
+    contracts_abi::{CallPushedFilter, LaminatedProxy, SolverData},
     solver::SolverParams,
     solvers::cleanapp_scheduler::CleanAppSchedulerSolver,
     stats::TimerExecutorStats,
@@ -44,7 +44,7 @@ pub struct LaminatorListener<M: Clone> {
     reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
 
     // Temporaty stores the cron string from the event
-    cron: String,
+    params: Vec<SolverData>,
 }
 
 impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
@@ -67,8 +67,15 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
             tick_duration,
             stats_tx,
             reports_pool,
-            cron: String::new(),
+            params: Vec::new(),
         }
+    }
+
+    fn is_cleanapp_event(&self, event: &CallPushedFilter) -> bool {
+        if event.call_objs.len() != 3 {
+            return false;
+        }
+        return event.call_objs[0].addr == self.kitn_disbursement_scheduler_address;
     }
 
     pub async fn listen(&mut self) {
@@ -82,7 +89,10 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
                 Ok(stream) => {
                     let mut stream_take = stream.take(10);
                     println!("Listening the event CallPushed ...");
-                    while let Some(Ok(call_pushed)) = stream_take.next().await {
+                    while let Some(Ok(mut call_pushed)) = stream_take.next().await {
+                        if !self.is_cleanapp_event(&call_pushed) {
+                            continue;
+                        }
                         let mut exec_set = self.exec_set.lock().await;
                         let tick_duration = self.tick_duration.clone();
                         let stats_tx = self.stats_tx.clone();
@@ -91,39 +101,57 @@ impl<M: Middleware + Clone + 'static> LaminatorListener<M> {
                         let laminated_proxy_address = self.laminated_proxy_address;
                         let kitn_disbursement_scheduler_address =
                             self.kitn_disbursement_scheduler_address;
-                        for ad in &call_pushed.data {
-                            match ad.name.as_str() {
-                                "CRON" => {
-                                    self.cron = ad.value.clone();
+
+                        let mut cron = String::new();
+                        if !call_pushed.data.is_empty() {
+                            for ad in &call_pushed.data {
+                                match ad.name.as_str() {
+                                    "CRON" => {
+                                        cron = ad.value.clone();
+                                    }
+                                    &_ => {}
                                 }
-                                &_ => {}
+                            }
+                            if !cron.is_empty() {
+                                self.params = call_pushed.data.clone();
+                            }
+                        } else {
+                            call_pushed.data = self.params.clone();
+                            for ad in &call_pushed.data {
+                                match ad.name.as_str() {
+                                    "CRON" => {
+                                        cron = ad.value.clone();
+                                    }
+                                    &_ => {}
+                                }
                             }
                         }
-                    
-                        let cron = self.cron.clone();
-                        exec_set.spawn(async move {
-                            match CleanAppSchedulerSolver::new(
-                                call_pushed.clone(),
-                                solver_params,
-                                laminated_proxy_address,
-                                kitn_disbursement_scheduler_address,
-                                reports_pool,
-                                cron,
-                            ) {
-                                Ok(clean_app_scheduler_solver) => {
-                                    let executor =
-                                        TimerRequestExecutor::<CleanAppSchedulerSolver<M>>::new(
+                        if !cron.is_empty() {
+                            exec_set.spawn(async move {
+                                match CleanAppSchedulerSolver::new(
+                                    call_pushed.clone(),
+                                    solver_params,
+                                    laminated_proxy_address,
+                                    kitn_disbursement_scheduler_address,
+                                    reports_pool,
+                                    cron,
+                                ) {
+                                    Ok(clean_app_scheduler_solver) => {
+                                        let executor = TimerRequestExecutor::<
+                                            CleanAppSchedulerSolver<M>,
+                                        >::new(
                                             clean_app_scheduler_solver,
                                             tick_duration,
                                             stats_tx,
                                         );
-                                    executor.execute(call_pushed).await;
+                                        executor.execute(call_pushed).await;
+                                    }
+                                    Err(err) => {
+                                        println!("Error creating the solver: {}", err);
+                                    }
                                 }
-                                Err(err) => {
-                                    println!("Error creating the solver: {}", err);
-                                }
-                            }
-                        });
+                            });
+                        }
                     }
                 }
                 Err(err) => {

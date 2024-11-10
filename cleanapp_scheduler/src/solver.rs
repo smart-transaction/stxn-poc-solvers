@@ -4,7 +4,6 @@ use std::{
     fmt::{self, Display},
     sync::Arc,
 };
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct SolverParams<M>
@@ -13,7 +12,6 @@ where
 {
     pub call_breaker_address: Address,
     pub middleware: Arc<M>,
-    pub guard: Arc<Mutex<bool>>,
 }
 
 pub struct SolverResponse {

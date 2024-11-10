@@ -99,7 +99,6 @@ async fn main() {
     let solver_params = SolverParams {
         call_breaker_address: args.call_breaker_address,
         middleware: cleanapp_provider.clone(),
-        guard: Arc::new(Mutex::new(true)),
     };
 
     // Extract laminated proxy address

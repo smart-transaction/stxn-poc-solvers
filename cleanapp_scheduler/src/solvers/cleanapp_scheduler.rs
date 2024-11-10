@@ -42,9 +42,6 @@ pub struct CleanAppSchedulerSolver<M> {
     // Trigger time
     trigger_time: Result<DateTime<Utc>, SolverError>,
 
-    // Transaction Guard
-    guard: Arc<Mutex<bool>>,
-
     // Reports Pool
     reports_pool: Arc<Mutex<HashMap<Address, U256>>>,
 }
@@ -71,7 +68,6 @@ impl<M: Middleware + Clone> CleanAppSchedulerSolver<M> {
             trigger_time: Err(SolverError::ParamError(
                 "Missing CRON parameter".to_string(),
             )),
-            guard: params.guard,
             reports_pool,
         };
 
@@ -168,7 +164,8 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
         let mut receivers: Vec<Address> = Vec::new();
         let mut amounts: Vec<U256> = Vec::new();
 
-        for (account, amount) in self.reports_pool.lock().await.iter() {
+        let mut reports = self.reports_pool.lock().await;
+        for (account, amount) in reports.iter() {
             receivers.push(*account);
             amounts.push(*amount);
         }
@@ -224,7 +221,6 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
         let call_bytes: Bytes = call_objects.encode().into();
         let return_bytes: Bytes = return_objects.encode().into();
         {
-            let _guard = self.guard.lock().await;
             match self
                 .call_breaker_contract
                 .execute_and_verify(call_bytes, return_bytes, associated_data, hintindices)
@@ -239,7 +235,6 @@ impl<M: Middleware> Solver for CleanAppSchedulerSolver<M> {
                             if let Some(receipt) = receipt {
                                 if let Some(status) = receipt.status {
                                     if status > 0.into() {
-                                        let mut reports = self.reports_pool.lock().await;
                                         reports.clear();
                                     }
                                     return Ok(SolverResponse {
