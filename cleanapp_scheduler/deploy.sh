@@ -100,6 +100,11 @@ services:
       - TICK_NANOS=${TICK_NANOS}
     ports:
       - 8888:8888
+    logging:
+      driver: "local"
+      options:
+        max-size: 100m
+        max-file: "15"
 
 COMPOSE
 

@@ -30,7 +30,7 @@ do
         LAMINATOR_ADDRESS=0x36aB7A6ad656BC19Da2D5Af5b46f3cf3fc47274D #
         CALL_BREAKER_ADDRESS=0x23912387357621473Ff6514a2DC20Df14cd72E7f #
         FLASH_LOAN_ADDRESS=0xA04bABcCbcf9B9E51eE4954DB223E34691F5F65D #
-        SWAP_POOL_ADDRESS=0xe9b5DD080B5CFFeB7CdEAD3e9B6d109C347b6cB4 #
+        SWAP_POOL_ADDRESS=0xD68B5dd90022f9871913198285cce9d90AAcCD62 #
         TICK_SECS=1
         TICK_NANOS=0
         break
@@ -101,6 +101,11 @@ services:
       - TICK_NANOS=${TICK_NANOS}
     ports:
       - 9999:9999
+    logging:
+      driver: "local"
+      options:
+        max-size: 100m
+        max-file: "15"
 
 COMPOSE
 
