@@ -10,8 +10,6 @@ use ethers::{
     signers::{LocalWallet, Signer},
 };
 use fatal::fatal;
-use solver::{selector, SolverParams};
-use solvers::limit_order;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{
     net::TcpListener,
@@ -22,11 +20,15 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::laminator_listener::LaminatorListener;
-use crate::stats::{get_stats_json, run_stats_receive, TimerExecutorStats};
+use crate::{
+    call_breaker_listener::CallBreakerListener,
+    solver::{selector, SolverParams},
+    solvers::limit_order::{APP_SELECTOR, FLASH_LOAN_NAME, SWAP_POOL_NAME},
+    stats::{get_stats_json, run_stats_receive, TimerExecutorStats},
+};
 
+mod call_breaker_listener;
 mod contracts_abi;
-mod laminator_listener;
 mod solver;
 mod solvers;
 mod stats;
@@ -42,9 +44,6 @@ pub struct Args {
 
     #[arg(long)]
     pub ws_chain_url: String,
-
-    #[arg(long)]
-    pub laminator_address: Address,
 
     #[arg(long)]
     pub call_breaker_address: Address,
@@ -72,6 +71,7 @@ async fn main() {
     let limit_order_wallet = args
         .limit_order_wallet_private_key
         .with_chain_id(args.chain_id);
+    let limit_order_wallet_address = limit_order_wallet.address();
     let stats_map = Arc::new(Mutex::new(HashMap::new()));
     let (stats_tx, mut stats_rx): (Sender<TimerExecutorStats>, Receiver<TimerExecutorStats>) =
         mpsc::channel(100);
@@ -90,33 +90,33 @@ async fn main() {
     }
     println!("Connected successfully!");
 
-    let limit_order_wallet_address = limit_order_wallet.address();
     let limit_order_provider = Arc::new(
         limit_order_provider
             .ok()
             .unwrap()
-            .with_signer(limit_order_wallet),
+            .with_signer(limit_order_wallet.clone()),
     );
 
     // Addresses of specific solvers contracts.
     let mut custom_contracts_addresses: HashMap<String, Address> = HashMap::new();
-    custom_contracts_addresses.insert("FLASH_LOAN".to_string(), args.flash_loan_address);
-    custom_contracts_addresses.insert("SWAP_POOL".to_string(), args.swap_pool_address);
+    custom_contracts_addresses.insert(FLASH_LOAN_NAME.to_string(), args.flash_loan_address);
+    custom_contracts_addresses.insert(SWAP_POOL_NAME.to_string(), args.swap_pool_address);
 
     let mut solver_params = HashMap::new();
     solver_params.insert(
-        selector(limit_order::APP_SELECTOR.to_string()),
+        selector(APP_SELECTOR.to_string()),
         SolverParams {
             call_breaker_address: args.call_breaker_address,
             solver_address: limit_order_wallet_address,
             middleware: limit_order_provider.clone(),
             extra_contract_addresses: custom_contracts_addresses.clone(),
             guard: Arc::new(Mutex::new(true)),
+            wallet: limit_order_wallet,
         },
     );
 
-    let mut listener = LaminatorListener::new(
-        args.laminator_address,
+    let mut listener = CallBreakerListener::new(
+        args.call_breaker_address,
         limit_order_provider.clone(),
         solver_params,
         exec_set.clone(),
