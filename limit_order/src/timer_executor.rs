@@ -1,11 +1,14 @@
 use ethers::types::U256;
 use fatal::fatal;
 use std::time::{Duration, SystemTime};
-use tokio::{sync::mpsc::Sender, time::{sleep, Instant}};
+use tokio::{
+    sync::mpsc::Sender,
+    time::{sleep, Instant},
+};
 use uuid::Uuid;
 
 use crate::{
-    contracts_abi::laminator::{AdditionalData, ProxyPushedFilter},
+    contracts_abi::call_breaker::{AdditionalData, UserObjectivePushedFilter},
     solver::Solver,
     stats::{Status, TimerExecutorStats, TransactionStatus},
 };
@@ -55,7 +58,7 @@ impl<S: Solver> TimerRequestExecutor<S> {
     }
 
     // Execute the FlashLiquidity executor with given params.
-    pub async fn execute(&self, event: ProxyPushedFilter) {
+    pub async fn execute(&self, event: UserObjectivePushedFilter) {
         println!("Executor {} started", self.id);
         // Initialize timer
         let now = Instant::now();
@@ -78,14 +81,14 @@ impl<S: Solver> TimerRequestExecutor<S> {
                     last_message = response.message.clone();
                     if response.succeeded {
                         self.send_stats(
-                            event.sequence_number,
+                            event.sequence_counter,
                             self.solver.app(),
                             Status::Running,
                             TransactionStatus::TransactionPending,
                             response.message.clone(),
                             &time_limit,
                             &now,
-                            &event.data_values,
+                            &event.mev_time_data,
                         )
                         .await;
                         match self.solver.final_exec().await {
@@ -93,28 +96,28 @@ impl<S: Solver> TimerRequestExecutor<S> {
                                 last_message = response.message.clone();
                                 if response.succeeded {
                                     self.send_stats(
-                                        event.sequence_number,
+                                        event.sequence_counter,
                                         self.solver.app(),
                                         Status::Succeeded,
                                         TransactionStatus::Succeeded,
                                         response.message.clone(),
                                         &time_limit,
                                         &now,
-                                        &event.data_values,
+                                        &event.mev_time_data,
                                     )
                                     .await;
                                     println!("Executor {} successfully finished", self.id);
                                     return;
                                 } else {
                                     self.send_stats(
-                                        event.sequence_number,
+                                        event.sequence_counter,
                                         self.solver.app(),
                                         Status::Running,
                                         TransactionStatus::TransactionPending,
                                         response.message.clone(),
                                         &time_limit,
                                         &now,
-                                        &event.data_values,
+                                        &event.mev_time_data,
                                     )
                                     .await;
                                     last_transaction_status = TransactionStatus::TransactionPending;
@@ -123,14 +126,14 @@ impl<S: Solver> TimerRequestExecutor<S> {
                             Err(err) => {
                                 println!("Error in solver final exec: {}", err);
                                 self.send_stats(
-                                    event.sequence_number,
+                                    event.sequence_counter,
                                     self.solver.app(),
                                     Status::Running,
                                     TransactionStatus::TransactionFailed,
                                     err.to_string(),
                                     &time_limit,
                                     &now,
-                                    &event.data_values,
+                                    &event.mev_time_data,
                                 )
                                 .await;
                                 last_transaction_status = TransactionStatus::TransactionFailed;
@@ -138,14 +141,14 @@ impl<S: Solver> TimerRequestExecutor<S> {
                         }
                     } else {
                         self.send_stats(
-                            event.sequence_number,
+                            event.sequence_counter,
                             self.solver.app(),
                             Status::Running,
                             TransactionStatus::StepPending,
                             response.message.clone(),
                             &time_limit,
                             &now,
-                            &event.data_values,
+                            &event.mev_time_data,
                         )
                         .await;
                         last_transaction_status = TransactionStatus::StepPending;
@@ -154,14 +157,14 @@ impl<S: Solver> TimerRequestExecutor<S> {
                 Err(err) => {
                     println!("Error in solver step call: {}", err);
                     self.send_stats(
-                        event.sequence_number,
+                        event.sequence_counter,
                         self.solver.app(),
                         Status::Failed,
                         TransactionStatus::StepFailed,
                         err.to_string(),
                         &time_limit,
                         &now,
-                        &event.data_values,
+                        &event.mev_time_data,
                     )
                     .await;
                     last_transaction_status = TransactionStatus::StepFailed;
@@ -172,14 +175,14 @@ impl<S: Solver> TimerRequestExecutor<S> {
         }
         // Sending post-exec stats
         self.send_stats(
-            event.sequence_number,
+            event.sequence_counter,
             self.solver.app(),
             Status::Timeout,
             last_transaction_status,
             last_message,
             &time_limit,
             &now,
-            &event.data_values,
+            &event.mev_time_data,
         )
         .await;
         println!("Executor {} finished by timeout", self.id);

@@ -1,14 +1,9 @@
+use crate::contracts_abi::call_breaker::AdditionalData;
 use axum::{extract::State, response::Json};
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{mpsc::Receiver, Mutex};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::Duration,
-};
 use uuid::Uuid;
-
-use crate::contracts_abi::laminator::AdditionalData;
 
 // Executor statistics
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]

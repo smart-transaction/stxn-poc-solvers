@@ -1,8 +1,9 @@
 use ethers::{
-    abi::AbiEncode,
+    abi::{self, Token},
+    signers::LocalWallet,
     types::{Address, H256},
+    utils::keccak256,
 };
-use keccak_hash::keccak;
 use std::{
     collections::HashMap,
     fmt::{self, Display},
@@ -21,6 +22,7 @@ where
     pub extra_contract_addresses: HashMap<String, Address>,
     pub middleware: Arc<M>,
     pub guard: Arc<Mutex<bool>>,
+    pub wallet: LocalWallet,
 }
 
 pub struct SolverResponse {
@@ -28,6 +30,7 @@ pub struct SolverResponse {
     pub message: String,
 }
 
+#[derive(Debug)]
 pub enum SolverError {
     MisleadingSelector(H256),
     ParamError(String),
@@ -58,5 +61,8 @@ pub trait Solver {
 }
 
 pub fn selector(app: String) -> H256 {
-    keccak(app.as_str().encode()).as_fixed_bytes().into()
+    let encoded = abi::encode(&[Token::String(app)]);
+    let hash = keccak256(&encoded);
+    let bytes32 = H256::from_slice(&hash);
+    return bytes32;
 }

@@ -1,22 +1,24 @@
 use crate::{
     contracts_abi::{
-        call_breaker::{CallBreaker, CallObject, ReturnObject},
+        call_breaker::{CallBreaker, CallObject, MevTimeData, UserObjective},
         ierc20::{ApproveCall, IERC20Calls},
-        laminated_proxy::{LaminatedProxyCalls, PullCall},
-        ProxyPushedFilter,
+        UserObjectivePushedFilter,
     },
-    solver::{self, Solver, SolverError, SolverParams, SolverResponse},
+    solver::{selector, Solver, SolverError, SolverParams, SolverResponse},
 };
 use ethers::{
-    abi::{self, AbiEncode, Token},
+    abi::{self, AbiDecode, AbiEncode, Token},
     core::abi::ethabi::ethereum_types::FromDecStrErr,
     prelude::abigen,
     providers::Middleware,
-    types::{Address, Bytes, H160, U256}, utils::parse_units,
+    signers::LocalWallet,
+    types::{Address, Bytes, H256, U256},
+    utils::{hash_message, keccak256, parse_units},
 };
 use fixed_hash::rustc_hex::FromHexError;
 use parse_duration;
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 abigen!(
@@ -36,13 +38,9 @@ pub struct LimitOrderSolver<M> {
     _solver_address: Address, // To be used after fixing associated data
 
     // Contract addresses to be called.
-    proxy_address: Address,
     call_breaker_address: Address,
     flash_loan_address: Address,
     swap_pool_address: Address,
-
-    // Sequence number for laminator proxy call
-    sequence_number: U256,
 
     // Contracts that are to be called.
     call_breaker_contract: CallBreaker<M>,
@@ -51,10 +49,12 @@ pub struct LimitOrderSolver<M> {
     // Limit order params
     pub give_token: Result<Address, FromHexError>,
     pub take_token: Result<Address, FromHexError>,
-    amount: Result<U256, FromDecStrErr>,
     buy_price: Result<U256, FromDecStrErr>,
     slippage: Result<U256, FromDecStrErr>,
     time_limit: Result<Duration, parse_duration::parse::Error>,
+
+    pub user_objective: UserObjective,
+    wallet: LocalWallet,
 
     // Transaction guard
     guard: Arc<Mutex<bool>>,
@@ -80,15 +80,16 @@ impl AbiEncode for FlashLoanData {
 
 impl<M: Middleware + Clone> LimitOrderSolver<M> {
     pub fn new(
-        event: ProxyPushedFilter,
+        event: UserObjectivePushedFilter,
         params: SolverParams<M>,
     ) -> Result<LimitOrderSolver<M>, SolverError> {
         println!("Event received: {}", event);
-        let flash_liquidity_selector = solver::selector(APP_SELECTOR.to_string());
-        if flash_liquidity_selector != event.selector.into() {
-            return Err(SolverError::MisleadingSelector(event.selector.into()));
+        let expected_app_id = selector(APP_SELECTOR.to_string());
+        let event_app_id: H256 = event.app_id;
+        if event_app_id != expected_app_id {
+            // Convert TxHash to H256 for error reporting
+            return Err(SolverError::MisleadingSelector(event_app_id));
         }
-
         let flash_loan_address = params.extra_contract_addresses.get(FLASH_LOAN_NAME);
         if let None = flash_loan_address {
             return Err(SolverError::ParamError(
@@ -102,7 +103,7 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
             ));
         }
         let mut ret = LimitOrderSolver {
-            proxy_address: event.proxy_address,
+            user_objective: event.user_objective.clone(),
             call_breaker_address: params.call_breaker_address,
             _solver_address: params.solver_address,
             flash_loan_address: *flash_loan_address.unwrap(),
@@ -115,27 +116,77 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
                 *swap_pool_address.unwrap(),
                 params.middleware.clone(),
             ),
-            sequence_number: event.sequence_number,
             give_token: Result::Err(FromHexError::InvalidHexLength),
             take_token: Result::Err(FromHexError::InvalidHexLength),
-            amount: Result::Err(FromDecStrErr::InvalidLength),
             buy_price: Result::Err(FromDecStrErr::InvalidLength),
             slippage: Result::Err(FromDecStrErr::InvalidLength),
             time_limit: Result::Err(parse_duration::parse::Error::NoValueFound(
                 "Uninitialized value".to_string(),
             )),
+            wallet: params.wallet.clone(),
             guard: params.guard.clone(),
         };
         // Extract parameters.
-        for ad in &event.data_values {
-            match ad.name.as_str() {
-                "give_token" => ret.give_token = H160::from_str(ad.value.as_str()),
-                "take_token" => ret.take_token = H160::from_str(ad.value.as_str()),
-                "amount" => ret.amount = U256::from_dec_str(ad.value.as_str()),
-                "buy_price" => ret.buy_price = U256::from_dec_str(ad.value.as_str()),
-                "slippage" => ret.slippage = U256::from_dec_str(ad.value.as_str()),
-                "time_limit" => ret.time_limit = parse_duration::parse(ad.value.as_str()),
-                &_ => {}
+        for ad in &event.mev_time_data {
+            match ad.key {
+                key_bytes
+                    if key_bytes
+                        == keccak256(abi::encode(&[ethers::abi::Token::String(
+                            "give_token".to_string(),
+                        )])) =>
+                {
+                    let hex_string = format!("0x{}", hex::encode(&ad.value));
+                    let address: Address = hex_string.parse().unwrap();
+                    ret.give_token = Ok(address);
+                }
+                key_bytes
+                    if key_bytes
+                        == keccak256(abi::encode(&[ethers::abi::Token::String(
+                            "take_token".to_string(),
+                        )])) =>
+                {
+                    let hex_string = format!("0x{}", hex::encode(&ad.value));
+                    let address: Address = hex_string.parse().unwrap();
+                    ret.take_token = Ok(address);
+                }
+                key_bytes
+                    if key_bytes
+                        == keccak256(abi::encode(&[ethers::abi::Token::String(
+                            "buy_price".to_string(),
+                        )])) =>
+                {
+                    if let Ok(tokens) = abi::decode(&[abi::ParamType::Uint(256)], &ad.value) {
+                        if let Some(Token::Uint(price)) = tokens.first() {
+                            ret.buy_price = Ok(*price);
+                        }
+                    }
+                }
+                key_bytes
+                    if key_bytes
+                        == keccak256(abi::encode(&[ethers::abi::Token::String(
+                            "slippage".to_string(),
+                        )])) =>
+                {
+                    if let Ok(tokens) = abi::decode(&[abi::ParamType::Uint(256)], &ad.value) {
+                        if let Some(Token::Uint(slippage)) = tokens.first() {
+                            ret.slippage = Ok(*slippage);
+                        }
+                    }
+                }
+                key_bytes
+                    if key_bytes
+                        == keccak256(abi::encode(&[ethers::abi::Token::String(
+                            "time_limit".to_string(),
+                        )])) =>
+                {
+                    let decoded_string = String::decode(&ad.value).unwrap();
+
+                    // Then parse the string to duration
+                    let duration = parse_duration::parse(&decoded_string).unwrap();
+
+                    ret.time_limit = Ok(duration);
+                }
+                _ => println!("Unknown key: {:?}", ad.key),
             }
         }
         // Check that all parameters are successfully extracted.
@@ -148,12 +199,6 @@ impl<M: Middleware + Clone> LimitOrderSolver<M> {
         if let Err(err) = ret.take_token {
             return Err(SolverError::ParamError(format!(
                 "Error in the parameter take_token: {}",
-                err
-            )));
-        }
-        if let Err(err) = ret.amount {
-            return Err(SolverError::ParamError(format!(
-                "Error in the parameter amount: {}",
                 err
             )));
         }
@@ -189,16 +234,16 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
     }
 
     async fn exec_solver_step(&self) -> Result<SolverResponse, SolverError> {
-        if let Err(err) = &self.amount {
-            return Err(SolverError::ExecError(err.to_string()));
-        }
         if let Err(err) = &self.buy_price {
             return Err(SolverError::ExecError(err.to_string()));
         }
         // Check the price
+        println!("Checking the price");
         match self.swap_pool_contract.get_price_of_weth().call().await {
             Ok(current_price) => {
                 let desired_price = *self.buy_price.as_ref().ok().unwrap();
+                println!("Current price: {}", current_price);
+                println!("Desired price: {}", desired_price);
                 if current_price > desired_price {
                     return Ok(SolverResponse {
                         succeeded: false,
@@ -225,32 +270,45 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
         let dai_liquidity_wei = parse_units(hardcoded_dai_liquidity, "ether").ok().unwrap();
         let weth_liquidity_wei = parse_units(hardcoded_weth_liquidity, "ether").ok().unwrap();
         let call_objects = vec![
+            // CallObject 0: DAI approve for swap pool
             CallObject {
                 amount: 0.into(),
-                addr: self.give_token.ok().unwrap(),
-                gas: 10000000.into(),
+                addr: self.give_token.ok().unwrap(), // DAI address
+                gas: 1000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
                     spender: self.swap_pool_address,
                     amount: dai_liquidity_wei.into(),
                 })
                 .encode()
                 .into(),
+                salt: 1.into(),
+                returnvalue: Bytes::new(),
+                skippable: false,
+                verifiable: true,
+                expose_return: false,
             },
+            // CallObject 1: WETH approve for swap pool
             CallObject {
                 amount: 0.into(),
-                addr: self.take_token.ok().unwrap(),
-                gas: 10000000.into(),
+                addr: self.take_token.ok().unwrap(), // WETH address
+                gas: 1000000.into(),
                 callvalue: IERC20Calls::Approve(ApproveCall {
                     spender: self.swap_pool_address,
                     amount: weth_liquidity_wei.into(),
                 })
                 .encode()
                 .into(),
+                salt: 1.into(),
+                returnvalue: Bytes::new(),
+                skippable: false,
+                verifiable: true,
+                expose_return: false,
             },
+            // CallObject 2: Provide liquidity to DAI/WETH pool
             CallObject {
                 amount: 0.into(),
                 addr: self.swap_pool_address,
-                gas: 10000000.into(),
+                gas: 1000000.into(),
                 callvalue: SwapPoolCalls::ProvideLiquidityToDAIETHPool(
                     ProvideLiquidityToDAIETHPoolCall {
                         provider: self.call_breaker_address,
@@ -260,17 +318,13 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
                 )
                 .encode()
                 .into(),
+                salt: 1.into(),
+                returnvalue: Bytes::new(),
+                skippable: false,
+                verifiable: true,
+                expose_return: false,
             },
-            CallObject {
-                amount: 0.into(),
-                addr: self.proxy_address,
-                gas: 10000000.into(),
-                callvalue: LaminatedProxyCalls::Pull(PullCall {
-                    seq_number: self.sequence_number,
-                })
-                .encode()
-                .into(),
-            },
+            // CallObject 3: Check slippage (future call)
             CallObject {
                 amount: 0.into(),
                 addr: self.swap_pool_address,
@@ -280,11 +334,17 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
                 })
                 .encode()
                 .into(),
+                salt: 0.into(),
+                returnvalue: Bytes::new(),
+                skippable: false,
+                verifiable: true,
+                expose_return: true,
             },
+            // CallObject 4: Withdraw liquidity from DAI/WETH pool
             CallObject {
                 amount: 0.into(),
                 addr: self.swap_pool_address,
-                gas: 10000000.into(),
+                gas: 1000000.into(),
                 callvalue: SwapPoolCalls::WithdrawLiquidityFromDAIETHPool(
                     WithdrawLiquidityFromDAIETHPoolCall {
                         provider: self.call_breaker_address,
@@ -294,62 +354,76 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
                 )
                 .encode()
                 .into(),
-            },
-        ];
-        let return_objects_from_pull = vec![
-            ReturnObject {
-                returnvalue: true.encode().into(),
-            },
-            ReturnObject {
+                salt: 1.into(),
                 returnvalue: Bytes::new(),
-            },
-        ];
-        let return_objects = vec![
-            ReturnObject {
-                returnvalue: true.encode().into(),
-            },
-            ReturnObject {
-                returnvalue: true.encode().into(),
-            },
-            ReturnObject {
-                returnvalue: Bytes::new(),
-            },
-            ReturnObject {
-                returnvalue: abi::encode(&[Token::Bytes(return_objects_from_pull.encode())]).into(),
-            },
-            ReturnObject {
-                returnvalue: Bytes::new(),
-            },
-            ReturnObject {
-                returnvalue: Bytes::new(),
+                skippable: false,
+                verifiable: true,
+                expose_return: false,
             },
         ];
 
-        let associated_data: Bytes = Bytes::from_str("0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000c040364975c732e2b61ede80abbc6666bc882f0e45406caaa44bed3e13479c186300000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000014335858f4c351de51acd8bede5c8889d2390083f7000000000000000000000000632ec94a0831e53d3569cd147364f65fbf6465a359bba763dcbf3dbb7d995bcc000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002").unwrap();
-        let hintdices: Bytes = Bytes::from_str("0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000014000000000000000000000000000000000000000000000000000000000000001c0000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000002c00000000000000000000000000000000000000000000000000000000000000340a7adac1f40528e8a4a9140ffc6a418676837d76a18d2f529d9972b6493d6bd7f000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000eba5b91a9bb3539022c141ea5627bf486661098830e60bf44a47a78828a150040000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000016e1b59da3095663ef70ac99cedf4fd4078e8a9db104c61cb5d9ed3c48d37b007000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002df2e89cf5c2dc7dbfd7662767283cc00e70733c91eb7c22f605deee80e3e07e5000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003be527a53261197da9c6a489c8d80ac91dc09a26f5def3ba3c6e219da2b1f275d00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000412b127dae580c49294132318c253e8415b9292e34d8a03bfb38c06d0ba05c0ef000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000005").unwrap();
+        let user_objectives = vec![
+            self.user_objective.clone(),
+            UserObjective {
+                app_id: Bytes::from(
+                    selector("FLASHLIQUIDITY.LIMITORDER".to_string())
+                        .as_bytes()
+                        .to_vec(),
+                ),
+                nonce: 0.into(),
+                tip: 0.into(),
+                chain_id: 0.into(),
+                max_fee_per_gas: 0.into(),
+                max_priority_fee_per_gas: 0.into(),
+                sender: self._solver_address,
+                signature: solver_signature(
+                    0.into(),
+                    &self._solver_address,
+                    &call_objects,
+                    &self.wallet,
+                )
+                .unwrap(),
+                call_objects,
+            },
+        ];
 
-        let flash_loan_data: Bytes = FlashLoanData {
-            provider: self.flash_loan_address,
-            amount_a: dai_liquidity_wei.into(),
-            amount_b: weth_liquidity_wei.into(),
-        }
-        .encode()
-        .into();
+        // Setting order of execution
+        let order_of_execution = vec![
+            U256::from(1),
+            U256::from(2),
+            U256::from(3),
+            U256::from(0),
+            U256::from(4),
+            U256::from(5),
+        ];
 
-        let call_bytes: Bytes = call_objects.encode().into();
-        let return_bytes: Bytes = return_objects.encode().into();
+        // Return values for each call
+        let returns_bytes = vec![
+            abi::encode(&[Token::Bool(true)]).into(),
+            abi::encode(&[Token::Bool(true)]).into(),
+            Bytes::new(),
+            Bytes::new(),
+            Bytes::new(),
+            Bytes::new(),
+        ];
+
+        // Create MevTimeData struct
+        let mev_time_data = MevTimeData {
+            validator_signature: Bytes::new(),
+            mev_time_data_values: vec![],
+        };
+
         {
             let _guard = self.guard.lock().await;
             match self
                 .call_breaker_contract
-                .execute_and_verify_with_flashloan(
-                    call_bytes,
-                    return_bytes,
-                    associated_data,
-                    hintdices,
-                    flash_loan_data,
+                .execute_and_verify(
+                    user_objectives,
+                    returns_bytes,
+                    order_of_execution,
+                    mev_time_data,
                 )
-                .gas(10000000)
+                .gas(5_000_000)
                 .send()
                 .await
             {
@@ -386,5 +460,59 @@ impl<M: Middleware> Solver for LimitOrderSolver<M> {
                 }
             }
         };
+    }
+}
+
+// Generate solver Signature
+fn solver_signature(
+    nonce: U256,
+    sender: &Address,
+    call_objects: &Vec<CallObject>,
+    wallet: &LocalWallet,
+) -> Result<Bytes, SolverError> {
+    // Convert CallObjects to Token tuples for encoding
+    let call_tokens: Vec<Token> = call_objects
+        .iter()
+        .map(|call_obj| {
+            Token::Tuple(vec![
+                Token::Uint(call_obj.salt),
+                Token::Uint(call_obj.amount),
+                Token::Uint(call_obj.gas),
+                Token::Address(call_obj.addr),
+                Token::Bytes(call_obj.callvalue.clone().to_vec()),
+                Token::Bytes(call_obj.returnvalue.clone().to_vec()),
+                Token::Bool(call_obj.skippable),
+                Token::Bool(call_obj.verifiable),
+                Token::Bool(call_obj.expose_return),
+            ])
+        })
+        .collect();
+
+    // Match the contract's signature verification exactly
+    let encoded_call_objects = abi::encode(&[Token::Array(call_tokens)]);
+    let encoded_data = abi::encode(&[
+        Token::Uint(nonce),
+        Token::Address(*sender),
+        Token::Bytes(encoded_call_objects),
+    ]);
+
+    let hash_bytes = keccak256(&encoded_data);
+    let hash = H256::from_slice(&hash_bytes);
+
+    // Ethereum-specific message prefix (EIP-191)
+    let eth_hash = hash_message(hash);
+
+    match wallet.sign_hash(eth_hash) {
+        Ok(sig) => {
+            // Convert into 65-byte compact form
+            let compact: [u8; 65] = sig.to_vec().try_into().map_err(|_| {
+                SolverError::ExecError("Failed to convert signature to compact form".to_string())
+            })?;
+            Ok(Bytes::from(compact.to_vec()))
+        }
+        Err(err) => Err(SolverError::ExecError(format!(
+            "Failed to sign hash: {}",
+            err
+        ))),
     }
 }
